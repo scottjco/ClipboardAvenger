@@ -1,0 +1,15 @@
+[package]
+name = "clipboard-avenger"
+version = "1.0.0"
+edition = "2021"
+build = "build.rs"
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp", "tiff", "ico"] }
+sha2 = "0.10"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_DataExchange", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Memory", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Registry", "Win32_Graphics_Gdi", "Win32_Security"] }
+[build-dependencies]
+winresource = "0.1"
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

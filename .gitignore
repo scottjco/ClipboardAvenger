@@ -1,0 +1,6 @@
+/target/
+/Saved/
+*.exe
+*.zip
+settings.ini
+activity.log
