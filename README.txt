@@ -1,5 +1,8 @@
 Clipboard Avenger
 
+Version 1.0.2 - Windows - Source only on GitHub.
+The GitHub repository provides source code, build files, and icon assets. No prebuilt EXE is provided; build the app yourself using the instructions at the end of this file.
+
 Run Clipboard Avenger.exe. It lives only in the system tray (check the ^ overflow arrow). Left-click its CA-and-sword icon to toggle ON/OFF: OFF darkens it, ON restores it. Right-click for settings:
   Turn Off / Turn On: pause or resume clipboard watching; shows the available action without a checkmark.
   --------------------
@@ -37,5 +40,5 @@ Building from source on Windows: install Rust with its MSVC toolchain and the Vi
 Build: cargo build --release --locked
 Test: cargo test --locked
 Built EXE: target\release\clipboard-avenger.exe
-The distributed EXE is named Clipboard Avenger.exe.
+You can rename your built EXE to Clipboard Avenger.exe and place it in your chosen folder.
 No network connections or image uploads.

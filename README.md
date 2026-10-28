@@ -1,10 +1,16 @@
 # Clipboard Avenger
 
+**Version 1.0.2 · Windows · Source only**
+
 <img src="clipboard-avenger.png" alt="Clipboard Avenger CA and sword icon" width="160">
 
 A Windows system tray app written in Rust that makes clipboard images smaller before you paste them. It works locally, with no network connections or image uploads.
 
+This repository contains the Rust source, build files, and icon assets. **No prebuilt EXE is provided. You must build the app yourself on Windows** using the instructions below.
+
 Choose PNG, JPG, WEBP, or Same as Source under Compression. JPG is the default. The app replaces an image only when the result is strictly smaller, and never overwrites source files. Images paste as file attachments, including in Discord.
+
+Version 1.0.2 includes native bitmap clipboard support for painting apps alongside compressed file attachments. It also includes the Turn On / Turn Off tray action, left-click toggling, selectable compression, resizing, saved copies, and Windows startup settings.
 
 ## Features and defaults
 
@@ -30,14 +36,16 @@ Compression appears above Resize. Its four format choices are followed by a sepa
 
 ## Build and run
 
-Use Windows with Rust's MSVC toolchain and the Visual Studio C++ Build Tools installed. In the repository directory, run:
+Prerequisites: Windows, Rust's MSVC toolchain, and the Visual Studio C++ Build Tools with the Windows SDK installed.
+
+Clone this repository, or select **Code → Download ZIP** and extract the source. Open a terminal in the folder containing `Cargo.toml`, then run:
 
 ```powershell
 cargo test --locked
 cargo build --release --locked
 ```
 
-Run `target\release\clipboard-avenger.exe`. It appears in the system tray, possibly under the overflow arrow. The icon is embedded during the build. This repository contains source and icon assets, with no prebuilt executable.
+Run the EXE you built at `target\release\clipboard-avenger.exe`. It appears in the system tray, possibly under the overflow arrow. The icon is embedded during the build. You can copy your built EXE to another folder before enabling Start with Windows.
 
 ## Settings and saved images
 
