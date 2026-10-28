@@ -24,6 +24,7 @@ Compression appears above Resize. Its four format choices are followed by a sepa
 
 - Text and non-image clipboard content are ignored. Mixed file selections retain non-image files and images that do not shrink.
 - Multiple copied image files are supported. Animated files are skipped to preserve animation.
+- A single image also offers standard Windows bitmap formats for painting apps, alongside the compressed file attachment. The bitmap represents the processed image, including its resized dimensions and transparency.
 - A single scan runs at a time, recent scanned content is cached, and clipboard changes during processing cancel replacement of the old selection.
 - Only one app instance runs at a time. Exit quits the current session without changing the saved startup preference.
 
