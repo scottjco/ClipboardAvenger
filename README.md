@@ -64,6 +64,31 @@ Clipboard working copies are separate from optional saved copies and are retaine
 
 Start with Windows applies only to your Windows account and needs no administrator permission. If you move the executable, run it once from its new location to update the startup path. Existing settings can be migrated from the app's former name, Desktop Image Avenger; see the [full usage notes](README.txt) for details.
 
+## Changelog
+
+### 1.0.2 — Current release
+
+Changes since the initial source release:
+
+- Added left-click toggling on the tray icon. OFF uses a darker icon; ON restores the original icon. The icon also reflects the saved state at startup.
+- Added **Compression** above Resize, with PNG, JPG, WEBP, and Same as Source. JPG is the default; transparent images retain an alpha-safe output format.
+- Moved **JPEG quality** into Compression, below the format choices and a separator. PNG and WEBP use lossless compression independently of JPEG quality.
+- Changed the top tray item to **Turn Off** while enabled and **Turn On** while disabled, with no checkmark.
+- Added native Windows bitmap clipboard formats alongside single-image file attachments for painting apps. Previously, processed JPEGs were offered only as attachments, which prevented bitmap-only paste operations.
+- Kept the compressed attachment's bytes, filename, and size intact while adding bitmap compatibility. Existing processed clipboard files can also receive the missing bitmap formats.
+- Saved the compression choice in the INI and set the EXE's version metadata to 1.0.2.
+- Updated the source-only build instructions and added the AI disclosure and release-numbering records.
+
+### 1.0.0 — Initial source release
+
+- Introduced the Windows tray app in Rust, with the CA-and-sword icon and an ON/OFF control.
+- Compressed opaque clipboard images to JPEG, preserved transparency through PNG, and replaced images only when the output was smaller. Non-image clipboard content was ignored.
+- Added JPEG quality choices from 50% to 100% in 5% steps, plus Don't / 75% / 50% / 25% resizing.
+- Supported multiple copied image files and supplied named, sized, indexed attachments for file-aware apps such as Discord.
+- Added optional Save Original and Save Avenged copies in the same folder, custom-folder selection, and silent fallback to Saved. Ten failed custom-folder attempts clear the selection.
+- Remembered settings in an INI and added optional Start with Windows. Fresh defaults were ON, JPEG 95%, no resizing, both save options OFF, and startup OFF.
+- Added a single-scan busy guard, recent-image cache, protection against replacing a newer clipboard selection, and single-instance operation.
+
 ## AI disclosure
 
 This project was made entirely with AI, if you have a problem with that. You do you, I'm not remotely pretending I made this. ChatGPT did it entirely by itself. I just directed it.

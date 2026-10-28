@@ -11,3 +11,7 @@ VERSIONING.md and the version references in this file in sync. Documentation-onl
 changes do not advance the app version. Rebuild the EXE and desktop ZIP when publishing a new app
 release so their version metadata matches the source. The GitHub repository
 contains source and assets only; do not upload EXEs or ZIPs.
+
+Update the Changelog sections in README.md and README.txt for each app release,
+describing actual changes since the previous recorded release. Do not invent
+changes for version numbers that were not separately recorded.

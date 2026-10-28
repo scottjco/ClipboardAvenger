@@ -43,6 +43,25 @@ Built EXE: target\release\clipboard-avenger.exe
 You can rename your built EXE to Clipboard Avenger.exe and place it in your chosen folder.
 No network connections or image uploads.
 
+Changelog
+
+1.0.2 - Current release (changes since the initial source release)
+- Left-click the tray icon to toggle ON/OFF; OFF darkens the icon and startup restores the matching saved-state icon.
+- Added Compression above Resize: PNG, JPG, WEBP, or Same as Source. JPG is the default and transparency is preserved with an alpha-safe output format.
+- Moved JPEG quality into Compression, below a separator. PNG and WEBP use lossless compression independently of JPEG quality.
+- The top tray action now reads Turn Off or Turn On, without a checkmark.
+- Single processed images now include native Windows bitmap clipboard formats alongside their file attachment, allowing bitmap-only painting-app paste operations. Existing processed files can receive the missing formats too.
+- Compressed attachment bytes, filenames, and sizes remain intact. Compression choice is saved in the INI; EXE metadata now identifies version 1.0.2.
+- Updated source-only build instructions and added AI disclosure and release-numbering records.
+
+1.0.0 - Initial source release
+- Rust Windows tray app with CA-and-sword icon, ON/OFF control, JPEG compression for opaque images, and PNG for transparency.
+- Replaced only smaller results, ignored non-images, and supported multiple image files through named, sized, indexed attachments for apps such as Discord.
+- JPEG quality 50%-100% in 5% steps; Resize Don't, 75%, 50%, or 25%.
+- Save Original and Save Avenged in one folder, custom-folder selection, silent fallback to Saved, and clearing of a custom path after ten failed attempts.
+- INI persistence and optional Start with Windows; defaults ON, JPEG 95%, no resize, saves OFF, startup OFF.
+- Single-scan busy guard, recent-image cache, clipboard-change protection, and single-instance operation.
+
 AI disclosure
 
 This project was made entirely with AI, if you have a problem with that. You do you, I'm not remotely pretending I made this. ChatGPT did it entirely by itself. I just directed it.
