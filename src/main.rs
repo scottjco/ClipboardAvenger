@@ -624,13 +624,12 @@ unsafe fn try_publish() {
 }
 unsafe fn tray_menu() -> HMENU {
     let menu = CreatePopupMenu();
-    let a = if ENABLED.load(Relaxed) { "ON" } else { "OFF" };
-    AppendMenuW(
-        menu,
-        MF_STRING | if ENABLED.load(Relaxed) { MF_CHECKED } else { 0 },
-        1,
-        wide(a).as_ptr(),
-    );
+    let a = if ENABLED.load(Relaxed) {
+        "Turn Off"
+    } else {
+        "Turn On"
+    };
+    AppendMenuW(menu, MF_STRING, 1, wide(a).as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, null_mut());
     let compression_menu = CreatePopupMenu();
     for compression in [
