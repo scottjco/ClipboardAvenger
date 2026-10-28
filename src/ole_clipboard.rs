@@ -225,8 +225,77 @@ fn format(name: &str) -> u16 {
         ) as u16
     }
 }
+// A file attachment alone cannot be pasted by bitmap-only applications such
+// as painting programs. Supply native DIB data alongside the compressed file.
+// Keep file formats first so file-aware consumers retain the real attachment.
+fn bitmap_entries(data: &[u8]) -> Option<Vec<Entry>> {
+    let image = image::load_from_memory(data).ok()?.to_rgba8();
+    let (width, height) = image.dimensions();
+    let width_i32 = i32::try_from(width).ok()?;
+    let height_i32 = i32::try_from(height).ok()?;
+    let transparent = image.pixels().any(|p| p[3] != 255);
+    let bits = if transparent { 32u16 } else { 24u16 };
+    let stride = (width as usize)
+        .checked_mul(bits as usize)?
+        .checked_add(31)?
+        / 32
+        * 4;
+    let size = stride.checked_mul(height as usize)?;
+    let rgba_size = (width as usize)
+        .checked_mul(4)?
+        .checked_mul(height as usize)?;
+    if size > 512 * 1024 * 1024 || rgba_size > 512 * 1024 * 1024 {
+        return None;
+    }
+    let mut dib = vec![0; 40usize.checked_add(size)?];
+    dib[..4].copy_from_slice(&40u32.to_le_bytes());
+    dib[4..8].copy_from_slice(&width_i32.to_le_bytes());
+    dib[8..12].copy_from_slice(&height_i32.to_le_bytes());
+    dib[12..14].copy_from_slice(&1u16.to_le_bytes());
+    dib[14..16].copy_from_slice(&bits.to_le_bytes());
+    dib[20..24].copy_from_slice(&(size as u32).to_le_bytes());
+    let mut v5 = vec![0; 124usize.checked_add(rgba_size)?];
+    v5[..40].copy_from_slice(&dib[..40]);
+    v5[..4].copy_from_slice(&124u32.to_le_bytes());
+    v5[14..16].copy_from_slice(&32u16.to_le_bytes());
+    v5[16..20].copy_from_slice(&3u32.to_le_bytes()); // BI_BITFIELDS
+    v5[20..24].copy_from_slice(&(rgba_size as u32).to_le_bytes());
+    for (offset, mask) in [
+        (40, 0x00ff0000u32),
+        (44, 0x0000ff00),
+        (48, 0x000000ff),
+        (52, 0xff000000),
+    ] {
+        v5[offset..offset + 4].copy_from_slice(&mask.to_le_bytes());
+    }
+    v5[56..60].copy_from_slice(&0x73524742u32.to_le_bytes()); // LCS_sRGB
+    v5[108..112].copy_from_slice(&4u32.to_le_bytes()); // LCS_GM_IMAGES
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let p = image.get_pixel(x as u32, (height as usize - 1 - y) as u32);
+            let bgra = [p[2], p[1], p[0], p[3]];
+            let offset = 40 + y * stride + x * (bits as usize / 8);
+            dib[offset..offset + bits as usize / 8].copy_from_slice(&bgra[..bits as usize / 8]);
+            let offset = 124 + (y * width as usize + x) * 4;
+            v5[offset..offset + 4].copy_from_slice(&bgra);
+        }
+    }
+    Some(vec![
+        Entry {
+            format: 17,
+            index: -1,
+            data: v5,
+        },
+        Entry {
+            format: 8,
+            index: -1,
+            data: dib,
+        },
+    ])
+}
 pub fn prepare(paths: &[PathBuf]) -> std::io::Result<Prepared> {
     let mut entries = Vec::new();
+    let mut native_bitmap = None;
     let mut drop = vec![0; 20];
     drop[..4].copy_from_slice(&20u32.to_le_bytes());
     drop[16..20].copy_from_slice(&1u32.to_le_bytes());
@@ -249,6 +318,7 @@ pub fn prepare(paths: &[PathBuf]) -> std::io::Result<Prepared> {
         let len = name.len().min(518);
         d[72..72 + len].copy_from_slice(&name[..len]);
         if paths.len() == 1 {
+            native_bitmap = bitmap_entries(&data);
             entries.push(Entry {
                 format: format("FileNameW"),
                 index: -1,
@@ -293,6 +363,9 @@ pub fn prepare(paths: &[PathBuf]) -> std::io::Result<Prepared> {
         index: -1,
         data: 1u32.to_le_bytes().to_vec(),
     });
+    if let Some(bitmap) = native_bitmap {
+        entries.extend(bitmap);
+    }
     Ok(Prepared {
         entries: Arc::new(entries),
     })
@@ -315,6 +388,91 @@ pub unsafe fn publish(prepared: &Prepared) -> Result<(), HRESULT> {
 mod tests {
     use super::*;
     #[test]
+    fn jpeg_attachment_also_offers_native_bitmaps_with_correct_rows_and_colors() {
+        use image::ImageEncoder;
+        // An odd width exercises DWORD row padding in the legacy 24-bit DIB.
+        let image = image::RgbImage::from_fn(7, 5, |x, y| {
+            image::Rgb([(x * 30) as u8, (y * 40) as u8, 90])
+        });
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+            .write_image(image.as_raw(), 7, 5, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let expected = image::load_from_memory(&jpeg).unwrap().to_rgb8();
+        let dir = std::env::temp_dir().join(format!("avenger-bitmap-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("image.jpg");
+        std::fs::write(&path, &jpeg).unwrap();
+        let prepared = prepare(&[path.clone()]).unwrap();
+        assert_eq!(prepared.entries[0].format, 15); // File attachment stays first.
+        let contents = prepared
+            .entries
+            .iter()
+            .find(|e| e.format == format("FileContents"))
+            .unwrap();
+        assert_eq!(contents.data, jpeg);
+        for format in [8, 17] {
+            let entry = prepared
+                .entries
+                .iter()
+                .find(|e| e.format == format)
+                .unwrap();
+            let decoded = super::super::imaging::dib_image(&entry.data).unwrap();
+            assert_eq!(decoded.to_rgb8(), expected);
+            unsafe {
+                let object = Box::into_raw(Box::new(Object {
+                    vtable: &VTABLE,
+                    refs: AtomicU32::new(1),
+                    entries: prepared.entries.clone(),
+                }));
+                let fmt = FORMATETC {
+                    cfFormat: format,
+                    ptd: null_mut(),
+                    dwAspect: 1,
+                    lindex: -1,
+                    tymed: 1,
+                };
+                assert_eq!(query_get(object, &fmt), 0);
+                let mut medium: STGMEDIUM = std::mem::zeroed();
+                assert_eq!(get(object, &fmt, &mut medium), 0);
+                assert_eq!(medium.tymed, 1);
+                let memory = GlobalLock(medium.u.hGlobal);
+                assert!(!memory.is_null());
+                assert_eq!(
+                    std::slice::from_raw_parts(memory as *const u8, entry.data.len()),
+                    entry.data
+                );
+                GlobalUnlock(medium.u.hGlobal);
+                ReleaseStgMedium(&mut medium);
+                release(object);
+            }
+        }
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
+    fn alpha_bitmap_preserves_every_transparent_pixel() {
+        let expected = image::RgbaImage::from_fn(3, 2, |x, y| {
+            image::Rgba([(x * 90) as u8, (y * 120) as u8, 70, (x * 70 + y * 30) as u8])
+        });
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(expected.clone())
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let entries = bitmap_entries(png.get_ref()).unwrap();
+        let v5 = entries.iter().find(|e| e.format == 17).unwrap();
+        assert_eq!(
+            super::super::imaging::dib_image(&v5.data)
+                .unwrap()
+                .to_rgba8(),
+            expected
+        );
+        let dib = entries.iter().find(|e| e.format == 8).unwrap();
+        assert_eq!(&dib.data[14..16], &32u16.to_le_bytes());
+        assert_eq!(dib.data[43], expected.get_pixel(0, 1)[3]);
+        assert!(bitmap_entries(b"plain text").is_none());
+    }
+    #[test]
     fn every_file_has_matching_name_size_and_indexed_content() {
         let dir = std::env::temp_dir().join(format!("avenger-ole-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -322,6 +480,10 @@ mod tests {
         std::fs::write(&paths[0], [1, 2, 3]).unwrap();
         std::fs::write(&paths[1], [4, 5, 6, 7, 8]).unwrap();
         let p = prepare(&paths).unwrap();
+        assert!(p
+            .entries
+            .iter()
+            .all(|entry| entry.format != 8 && entry.format != 17));
         let desc = p
             .entries
             .iter()

@@ -525,7 +525,9 @@ unsafe fn scan(hwnd: HWND, seq: u32, options: ScanOptions) {
         }
     }
     let upgrade_own_files = paths.iter().any(|p| p.starts_with(image_dir()))
-        && IsClipboardFormatAvailable(RegisterClipboardFormatW(wide("FileContents").as_ptr())) == 0;
+        && (IsClipboardFormatAvailable(RegisterClipboardFormatW(wide("FileContents").as_ptr()))
+            == 0
+            || (paths.len() == 1 && IsClipboardFormatAvailable(8) == 0));
     let captured = GetClipboardSequenceNumber();
     CloseClipboard();
     if captured != seq {
