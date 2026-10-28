@@ -5,7 +5,7 @@ mod startup;
 mod storage;
 #[cfg(test)]
 use image::DynamicImage;
-use imaging::dib_image;
+use imaging::{dib_image, Compression};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, VecDeque},
@@ -25,6 +25,7 @@ use windows_sys::Win32::{
 };
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static QUALITY: AtomicU32 = AtomicU32::new(95);
+static COMPRESSION: AtomicU32 = AtomicU32::new(Compression::Jpg as u32);
 static START_WITH_WINDOWS: AtomicBool = AtomicBool::new(false);
 static RESIZE: AtomicU32 = AtomicU32::new(100);
 static SAVE_ORIGINAL: AtomicBool = AtomicBool::new(false);
@@ -39,10 +40,12 @@ static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 static SETTINGS_WRITE: Mutex<()> = Mutex::new(());
 const QUALITY_MENU_BASE: u32 = 1000;
 const RESIZE_MENU_BASE: u32 = 2000;
+const COMPRESSION_MENU_BASE: u32 = 3000;
 #[derive(Debug, PartialEq)]
 struct Settings {
     enabled: bool,
     jpeg_quality: u8,
+    compression: Compression,
     start_with_windows: bool,
     resize_percent: u8,
     save_original: bool,
@@ -55,6 +58,7 @@ impl Default for Settings {
         Self {
             enabled: true,
             jpeg_quality: 95,
+            compression: Compression::Jpg,
             start_with_windows: false,
             resize_percent: 100,
             save_original: false,
@@ -116,6 +120,10 @@ impl Settings {
                 }
             } else if key.trim().eq_ignore_ascii_case("SaveFolderFailures") {
                 settings.folder_failures = value.parse().unwrap_or(0);
+            } else if key.trim().eq_ignore_ascii_case("Compression") {
+                if let Some(compression) = Compression::parse(value) {
+                    settings.compression = compression;
+                }
             } else if key.trim().eq_ignore_ascii_case("JpegQuality") {
                 if let Ok(quality) = value.parse::<u8>() {
                     if valid_quality(quality) {
@@ -131,7 +139,7 @@ impl Settings {
         settings
     }
     fn to_ini(&self) -> String {
-        format!("; Clipboard Avenger settings\n; Lower JPEG quality means smaller files. Transparent images use PNG.\n; ResizePercent=100 means Don't. Empty SaveFolder uses Saved beside the EXE.\n[Settings]\nEnabled={}\nJpegQuality={}\nResizePercent={}\nSaveOriginal={}\nSaveAvenged={}\nSaveFolder={}\nSaveFolderFailures={}\nStartWithWindows={}\n", self.enabled, self.jpeg_quality, self.resize_percent, self.save_original, self.save_avenged, self.save_folder, self.folder_failures, self.start_with_windows)
+        format!("; Clipboard Avenger settings\n; JPEG quality applies to JPG. PNG and WEBP use lossless compression.\n; ResizePercent=100 means Don't. Empty SaveFolder uses Saved beside the EXE.\n[Settings]\nEnabled={}\nCompression={}\nJpegQuality={}\nResizePercent={}\nSaveOriginal={}\nSaveAvenged={}\nSaveFolder={}\nSaveFolderFailures={}\nStartWithWindows={}\n", self.enabled, self.compression.label(), self.jpeg_quality, self.resize_percent, self.save_original, self.save_avenged, self.save_folder, self.folder_failures, self.start_with_windows)
     }
 }
 fn parse_bool(value: &str) -> Option<bool> {
@@ -187,6 +195,7 @@ fn save() {
     let settings = Settings {
         enabled: ENABLED.load(Relaxed),
         jpeg_quality: QUALITY.load(Relaxed) as u8,
+        compression: Compression::from_id(COMPRESSION.load(Relaxed)),
         start_with_windows: START_WITH_WINDOWS.load(Relaxed),
         resize_percent: RESIZE.load(Relaxed) as u8,
         save_original: SAVE_ORIGINAL.load(Relaxed),
@@ -231,6 +240,7 @@ unsafe fn bytes(fmt: u32) -> Option<Vec<u8>> {
 #[derive(Clone)]
 struct ScanOptions {
     quality: u8,
+    compression: Compression,
     resize_percent: u8,
     save_original: bool,
     save_avenged: bool,
@@ -241,6 +251,7 @@ impl ScanOptions {
     fn current() -> Self {
         Self {
             quality: QUALITY.load(Relaxed) as u8,
+            compression: Compression::from_id(COMPRESSION.load(Relaxed)),
             resize_percent: RESIZE.load(Relaxed) as u8,
             save_original: SAVE_ORIGINAL.load(Relaxed),
             save_avenged: SAVE_AVENGED.load(Relaxed),
@@ -342,7 +353,11 @@ fn archive_images(
     }
 }
 fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
-    let key = cache_key(data, dib, options.quality, options.resize_percent);
+    let key = format!(
+        "{}-c{}",
+        cache_key(data, dib, options.quality, options.resize_percent),
+        options.compression as u32
+    );
     // Archiving preferences also affect scan results, including a no-shrink
     // image whose original still needs saving after Save Original is enabled.
     let memo_key = format!(
@@ -382,7 +397,19 @@ fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
         } else {
             image::load_from_memory(data).ok()?
         };
-        let out = imaging::encoded(&img, data.len(), options.quality, options.resize_percent);
+        let source = if dib {
+            image::ImageFormat::Bmp
+        } else {
+            image::guess_format(data).ok()?
+        };
+        let out = imaging::encoded_as(
+            &img,
+            data.len(),
+            options.quality,
+            options.resize_percent,
+            options.compression,
+            source,
+        );
         if !options.active() {
             return None;
         }
@@ -605,6 +632,48 @@ unsafe fn tray_menu() -> HMENU {
         wide(a).as_ptr(),
     );
     AppendMenuW(menu, MF_SEPARATOR, 0, null_mut());
+    let compression_menu = CreatePopupMenu();
+    for compression in [
+        Compression::Png,
+        Compression::Jpg,
+        Compression::Webp,
+        Compression::Source,
+    ] {
+        AppendMenuW(
+            compression_menu,
+            MF_STRING
+                | if COMPRESSION.load(Relaxed) == compression as u32 {
+                    MF_CHECKED
+                } else {
+                    0
+                },
+            (COMPRESSION_MENU_BASE + compression as u32) as usize,
+            wide(compression.label()).as_ptr(),
+        );
+    }
+    AppendMenuW(compression_menu, MF_SEPARATOR, 0, null_mut());
+    let quality_menu = CreatePopupMenu();
+    let selected = QUALITY.load(Relaxed);
+    for quality in (50..=100).step_by(5) {
+        AppendMenuW(
+            quality_menu,
+            MF_STRING | if quality == selected { MF_CHECKED } else { 0 },
+            (QUALITY_MENU_BASE + quality) as usize,
+            wide(&format!("{}%", quality)).as_ptr(),
+        );
+    }
+    AppendMenuW(
+        compression_menu,
+        MF_POPUP,
+        quality_menu as usize,
+        wide(&format!("JPEG quality: {}%", selected)).as_ptr(),
+    );
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        compression_menu as usize,
+        wide("Compression").as_ptr(),
+    );
     let resize_menu = CreatePopupMenu();
     let selected_resize = RESIZE.load(Relaxed);
     for resize in [100, 75, 50, 25] {
@@ -630,22 +699,6 @@ unsafe fn tray_menu() -> HMENU {
         MF_POPUP,
         resize_menu as usize,
         wide("Resize").as_ptr(),
-    );
-    let quality_menu = CreatePopupMenu();
-    let selected = QUALITY.load(Relaxed);
-    for quality in (50..=100).step_by(5) {
-        AppendMenuW(
-            quality_menu,
-            MF_STRING | if quality == selected { MF_CHECKED } else { 0 },
-            (QUALITY_MENU_BASE + quality) as usize,
-            wide(&format!("{}%", quality)).as_ptr(),
-        );
-    }
-    AppendMenuW(
-        menu,
-        MF_POPUP,
-        quality_menu as usize,
-        wide(&format!("JPEG quality: {}%", selected)).as_ptr(),
     );
     let save_menu = CreatePopupMenu();
     AppendMenuW(
@@ -723,6 +776,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             0
         }
         WM_APP => {
+            if l as u32 == WM_LBUTTONUP {
+                toggle_enabled(hwnd);
+                return 0;
+            }
             if l as u32 == WM_RBUTTONUP || l as u32 == WM_CONTEXTMENU {
                 let menu = tray_menu();
                 let mut p = std::mem::zeroed();
@@ -740,8 +797,7 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 DestroyMenu(menu);
                 match cmd {
                     1 => {
-                        ENABLED.fetch_xor(true, Relaxed);
-                        options_changed();
+                        toggle_enabled(hwnd);
                     }
                     2 => {
                         DestroyWindow(hwnd);
@@ -788,6 +844,13 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                             options_changed();
                         }
                     }
+                    cmd if (COMPRESSION_MENU_BASE..=COMPRESSION_MENU_BASE + 3)
+                        .contains(&(cmd as u32)) =>
+                    {
+                        COMPRESSION.store(cmd as u32 - COMPRESSION_MENU_BASE, Relaxed);
+                        options_changed();
+                        update_tooltip(hwnd);
+                    }
                     cmd if (RESIZE_MENU_BASE + 25..=RESIZE_MENU_BASE + 100)
                         .contains(&(cmd as u32)) =>
                     {
@@ -818,6 +881,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
             n.hWnd = hwnd;
             n.uID = 1;
             Shell_NotifyIconW(NIM_DELETE, &n);
+            let icons = tray_icons();
+            if icons.1 != 0 {
+                DestroyIcon(icons.1 as HICON);
+            }
             OleFlushClipboard();
             PostQuitMessage(0);
             0
@@ -830,13 +897,79 @@ unsafe fn update_tooltip(hwnd: HWND) {
     n.cbSize = std::mem::size_of_val(&n) as u32;
     n.hWnd = hwnd;
     n.uID = 1;
-    n.uFlags = NIF_TIP;
-    let tip = wide(&format!(
-        "Clipboard Avenger — JPEG {}% / lossless PNG",
-        QUALITY.load(Relaxed)
-    ));
+    n.uFlags = NIF_TIP | NIF_ICON;
+    n.hIcon = selected_tray_icon();
+    let tip = tray_tip();
     n.szTip[..tip.len()].copy_from_slice(&tip);
     Shell_NotifyIconW(NIM_MODIFY, &n);
+}
+fn tray_tip() -> Vec<u16> {
+    wide(&format!(
+        "Clipboard Avenger — {} — {} / JPEG {}%",
+        if ENABLED.load(Relaxed) { "ON" } else { "OFF" },
+        Compression::from_id(COMPRESSION.load(Relaxed)).label(),
+        QUALITY.load(Relaxed)
+    ))
+}
+unsafe fn toggle_enabled(hwnd: HWND) {
+    ENABLED.fetch_xor(true, Relaxed);
+    options_changed();
+    update_tooltip(hwnd);
+}
+fn tray_icons() -> &'static (usize, usize) {
+    static ICONS: OnceLock<(usize, usize)> = OnceLock::new();
+    ICONS.get_or_init(|| unsafe {
+        let instance = GetModuleHandleW(null_mut());
+        let normal = LoadIconW(instance, 1usize as *const u16);
+        // Derive a second icon from the existing artwork, preserving its alpha.
+        let dark = dark_tray_icon(instance);
+        (normal as usize, dark as usize)
+    })
+}
+unsafe fn selected_tray_icon() -> HICON {
+    let icons = tray_icons();
+    if ENABLED.load(Relaxed) || icons.1 == 0 {
+        icons.0 as HICON
+    } else {
+        icons.1 as HICON
+    }
+}
+unsafe fn dark_tray_icon(_instance: HINSTANCE) -> HICON {
+    let Ok(image) = image::load_from_memory(include_bytes!("../clipboard-avenger.ico")) else {
+        return null_mut();
+    };
+    let mut rgba = image
+        .resize_exact(32, 32, image::imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    for p in rgba.pixels_mut() {
+        for channel in &mut p.0[..3] {
+            *channel = (u16::from(*channel) * 35 / 100) as u8;
+        }
+    }
+    let mut ico = Vec::new();
+    use image::ImageEncoder;
+    if image::codecs::ico::IcoEncoder::new(&mut ico)
+        .write_image(rgba.as_raw(), 32, 32, image::ExtendedColorType::Rgba8)
+        .is_err()
+    {
+        return null_mut();
+    }
+    if ico.len() < 22 {
+        return null_mut();
+    }
+    let offset = u32::from_le_bytes(ico[18..22].try_into().unwrap()) as usize;
+    if offset >= ico.len() {
+        return null_mut();
+    }
+    CreateIconFromResourceEx(
+        ico[offset..].as_ptr(),
+        (ico.len() - offset) as u32,
+        1,
+        0x00030000,
+        32,
+        32,
+        LR_DEFAULTCOLOR,
+    )
 }
 fn main() {
     unsafe {
@@ -863,6 +996,7 @@ fn main() {
         let settings = load_settings();
         ENABLED.store(settings.enabled, Relaxed);
         QUALITY.store(settings.jpeg_quality as u32, Relaxed);
+        COMPRESSION.store(settings.compression as u32, Relaxed);
         RESIZE.store(settings.resize_percent as u32, Relaxed);
         SAVE_ORIGINAL.store(settings.save_original, Relaxed);
         SAVE_AVENGED.store(settings.save_avenged, Relaxed);
@@ -907,11 +1041,8 @@ fn main() {
         n.uID = 1;
         n.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         n.uCallbackMessage = WM_APP;
-        n.hIcon = LoadIconW(instance, 1usize as *const u16);
-        let tip = wide(&format!(
-            "Clipboard Avenger — JPEG {}% / lossless PNG",
-            QUALITY.load(Relaxed)
-        ));
+        n.hIcon = selected_tray_icon();
+        let tip = tray_tip();
         n.szTip[..tip.len()].copy_from_slice(&tip);
         Shell_NotifyIconW(NIM_ADD, &n);
         SetTimer(hwnd, 1, 250, None);
@@ -1094,7 +1225,20 @@ mod tests {
             assert_ne!(GetMenuState(menu, 5, MF_BYPOSITION) & MF_SEPARATOR, 0);
             assert_eq!(GetMenuItemID(menu, 6), 3);
             assert_eq!(GetMenuItemID(menu, 7), 2);
-            let resize = GetSubMenu(menu, 2);
+            let compression = GetSubMenu(menu, 2);
+            assert_eq!(GetMenuItemCount(compression), 6);
+            for index in 0..4 {
+                assert_eq!(
+                    GetMenuItemID(compression, index),
+                    COMPRESSION_MENU_BASE + index as u32
+                );
+            }
+            assert_ne!(
+                GetMenuState(compression, 4, MF_BYPOSITION) & MF_SEPARATOR,
+                0
+            );
+            assert_eq!(GetMenuItemCount(GetSubMenu(compression, 5)), 11);
+            let resize = GetSubMenu(menu, 3);
             assert_eq!(GetMenuItemCount(resize), 4);
             for (index, percent) in [100, 75, 50, 25].into_iter().enumerate() {
                 assert_eq!(
@@ -1102,7 +1246,6 @@ mod tests {
                     RESIZE_MENU_BASE + percent
                 );
             }
-            assert_eq!(GetMenuItemCount(GetSubMenu(menu, 3)), 11);
             let save = GetSubMenu(menu, 4);
             assert_eq!(GetMenuItemCount(save), 3);
             assert_eq!(GetMenuItemID(save, 0), 4);
@@ -1111,6 +1254,38 @@ mod tests {
             assert_eq!(GetMenuState(save, 0, MF_BYPOSITION) & MF_CHECKED, 0);
             assert_eq!(GetMenuState(save, 1, MF_BYPOSITION) & MF_CHECKED, 0);
             DestroyMenu(menu);
+        }
+    }
+    #[test]
+    fn every_compression_choice_is_saved_and_restored() {
+        for compression in [
+            Compression::Png,
+            Compression::Jpg,
+            Compression::Webp,
+            Compression::Source,
+        ] {
+            let settings = Settings {
+                compression,
+                ..Settings::default()
+            };
+            assert_eq!(Settings::from_ini(&settings.to_ini()), settings);
+        }
+        assert_eq!(
+            Settings::from_ini("[Settings]\nCompression=unknown\n").compression,
+            Compression::Jpg
+        );
+    }
+    #[test]
+    fn darker_tray_artwork_creates_a_valid_windows_icon() {
+        unsafe {
+            let icon = dark_tray_icon(GetModuleHandleW(null_mut()));
+            assert!(!icon.is_null());
+            let mut info: ICONINFO = std::mem::zeroed();
+            assert_ne!(GetIconInfo(icon, &mut info), 0);
+            assert!(!info.hbmColor.is_null());
+            windows_sys::Win32::Graphics::Gdi::DeleteObject(info.hbmColor);
+            windows_sys::Win32::Graphics::Gdi::DeleteObject(info.hbmMask);
+            DestroyIcon(icon);
         }
     }
     #[test]

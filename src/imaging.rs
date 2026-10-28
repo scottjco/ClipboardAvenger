@@ -44,6 +44,39 @@ pub struct Encoded {
     pub extension: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Compression {
+    Png = 0,
+    #[default]
+    Jpg = 1,
+    Webp = 2,
+    Source = 3,
+}
+impl Compression {
+    pub fn from_id(id: u32) -> Self {
+        match id {
+            0 => Self::Png,
+            2 => Self::Webp,
+            3 => Self::Source,
+            _ => Self::Jpg,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Png => "PNG",
+            Self::Jpg => "JPG",
+            Self::Webp => "WEBP",
+            Self::Source => "Same as Source",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        [Self::Png, Self::Jpg, Self::Webp, Self::Source]
+            .into_iter()
+            .find(|v| v.label().eq_ignore_ascii_case(text))
+    }
+}
+
 fn scaled_dimension(dimension: u32, percent: u8) -> u32 {
     ((u64::from(dimension) * u64::from(percent) + 50) / 100).max(1) as u32
 }
@@ -106,31 +139,79 @@ fn resize_transparent(img: &DynamicImage, width: u32, height: u32) -> DynamicIma
     }
 }
 
+#[cfg(test)]
 pub fn encoded(
     img: &DynamicImage,
     original: usize,
     quality: u8,
     resize_percent: u8,
 ) -> Option<Encoded> {
+    encoded_as(
+        img,
+        original,
+        quality,
+        resize_percent,
+        Compression::Jpg,
+        image::ImageFormat::Bmp,
+    )
+}
+
+pub fn encoded_as(
+    img: &DynamicImage,
+    original: usize,
+    quality: u8,
+    resize_percent: u8,
+    compression: Compression,
+    source: image::ImageFormat,
+) -> Option<Encoded> {
     if !matches!(resize_percent, 25 | 50 | 75 | 100) || img.width() == 0 || img.height() == 0 {
         return None;
     }
     // Inspect the source, because downsampling can round a single faintly
-    // transparent pixel to opaque. Such inputs must still remain PNG.
+    // transparent pixel to opaque. Never discard source transparency.
     let transparent = has_transparency(img);
     let (width, height) = (
         scaled_dimension(img.width(), resize_percent),
         scaled_dimension(img.height(), resize_percent),
     );
     let mut out = Vec::new();
-    let extension = if transparent {
+    let mut format = match compression {
+        Compression::Png => image::ImageFormat::Png,
+        Compression::Jpg => image::ImageFormat::Jpeg,
+        Compression::Webp => image::ImageFormat::WebP,
+        Compression::Source => source,
+    };
+    if transparent
+        && !matches!(
+            format,
+            image::ImageFormat::Png
+                | image::ImageFormat::WebP
+                | image::ImageFormat::Tiff
+                | image::ImageFormat::Ico
+        )
+    {
+        format = image::ImageFormat::Png;
+    }
+    // WebP stores 8-bit alpha. Keep faint 16-bit transparency intact in PNG.
+    if transparent
+        && format == image::ImageFormat::WebP
+        && matches!(
+            img,
+            DynamicImage::ImageLumaA16(_)
+                | DynamicImage::ImageRgba16(_)
+                | DynamicImage::ImageRgba32F(_)
+        )
+    {
+        format = image::ImageFormat::Png;
+    }
+    let extension = if format == image::ImageFormat::Png {
         use image::codecs::png::{CompressionType, FilterType, PngEncoder};
         let rgba = resize_transparent(img, width, height);
         PngEncoder::new_with_quality(&mut out, CompressionType::Best, FilterType::Adaptive)
             .write_image(rgba.as_bytes(), width, height, rgba.color().into())
             .ok()?;
         "png"
-    } else {
+    } else if format == image::ImageFormat::Jpeg {
         let mut rgb = img.to_rgb8();
         if rgb.dimensions() != (width, height) {
             rgb =
@@ -140,6 +221,40 @@ pub fn encoded(
             .write_image(rgb.as_raw(), width, height, image::ExtendedColorType::Rgb8)
             .ok()?;
         "jpg"
+    } else {
+        let processed = if transparent {
+            resize_transparent(img, width, height)
+        } else {
+            let rgb = img.to_rgb8();
+            DynamicImage::ImageRgb8(if rgb.dimensions() == (width, height) {
+                rgb
+            } else {
+                image::imageops::resize(&rgb, width, height, image::imageops::FilterType::Triangle)
+            })
+        };
+        if format == image::ImageFormat::WebP {
+            let rgba = processed.to_rgba8();
+            image::codecs::webp::WebPEncoder::new_lossless(&mut out)
+                .write_image(
+                    rgba.as_raw(),
+                    width,
+                    height,
+                    image::ExtendedColorType::Rgba8,
+                )
+                .ok()?;
+            "webp"
+        } else {
+            processed
+                .write_to(&mut std::io::Cursor::new(&mut out), format)
+                .ok()?;
+            match format {
+                image::ImageFormat::Bmp => "bmp",
+                image::ImageFormat::Tiff => "tiff",
+                image::ImageFormat::Ico => "ico",
+                image::ImageFormat::Gif => "gif",
+                _ => return None,
+            }
+        }
     };
     (out.len() < original).then_some(Encoded {
         bytes: out,
@@ -151,6 +266,83 @@ pub fn encoded(
 mod tests {
     use super::*;
     use image::RgbaImage;
+
+    #[test]
+    fn compression_choices_produce_the_requested_format_and_only_replace_smaller_images() {
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            64,
+            48,
+            image::Rgb([30, 120, 220]),
+        ));
+        for (compression, source, expected) in [
+            (
+                Compression::Png,
+                image::ImageFormat::Jpeg,
+                image::ImageFormat::Png,
+            ),
+            (
+                Compression::Jpg,
+                image::ImageFormat::Png,
+                image::ImageFormat::Jpeg,
+            ),
+            (
+                Compression::Webp,
+                image::ImageFormat::Png,
+                image::ImageFormat::WebP,
+            ),
+            (
+                Compression::Source,
+                image::ImageFormat::Png,
+                image::ImageFormat::Png,
+            ),
+            (
+                Compression::Source,
+                image::ImageFormat::Jpeg,
+                image::ImageFormat::Jpeg,
+            ),
+            (
+                Compression::Source,
+                image::ImageFormat::WebP,
+                image::ImageFormat::WebP,
+            ),
+            (
+                Compression::Source,
+                image::ImageFormat::Bmp,
+                image::ImageFormat::Bmp,
+            ),
+        ] {
+            let out = encoded_as(&img, usize::MAX, 95, 50, compression, source).unwrap();
+            assert_eq!(image::guess_format(&out.bytes).unwrap(), expected);
+            let decoded = image::load_from_memory(&out.bytes).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (32, 24));
+            assert!(encoded_as(&img, out.bytes.len(), 95, 50, compression, source).is_none());
+        }
+    }
+    #[test]
+    fn all_compression_choices_keep_transparency() {
+        let rgba = RgbaImage::from_fn(32, 24, |x, y| {
+            image::Rgba([40, 180, 210, ((x + y) * 4) as u8])
+        });
+        let img = DynamicImage::ImageRgba8(rgba.clone());
+        for compression in [
+            Compression::Png,
+            Compression::Jpg,
+            Compression::Webp,
+            Compression::Source,
+        ] {
+            let out = encoded_as(
+                &img,
+                usize::MAX,
+                95,
+                100,
+                compression,
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+            let decoded = image::load_from_memory(&out.bytes).unwrap().to_rgba8();
+            assert_eq!(decoded, rgba);
+        }
+    }
 
     #[test]
     fn every_resize_choice_uses_rounded_dimensions() {
