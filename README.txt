@@ -1,7 +1,7 @@
 Clipboard Avenger
 
 Run Clipboard Avenger.exe. It lives only in the system tray (check the ^ overflow arrow). Left-click its CA-and-sword icon to toggle ON/OFF: OFF darkens it, ON restores it. Right-click for settings:
-  ON / OFF: pause or resume clipboard watching.
+  Turn Off / Turn On: pause or resume clipboard watching; shows the available action without a checkmark.
   --------------------
   Compression: PNG, JPG (default), WEBP, or Same as Source.
     --------------------

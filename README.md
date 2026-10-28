@@ -12,7 +12,7 @@ Left-click the tray icon to turn watching ON or OFF. OFF uses a darker version o
 
 | Setting | Options | Default |
 | --- | --- | --- |
-| Clipboard watching | ON / OFF | ON |
+| Clipboard watching | Turn Off / Turn On (action, no checkmark) | ON |
 | Compression | PNG, JPG, WEBP, Same as Source | JPG |
 | Resize | Don't, 75%, 50%, 25% | Don't |
 | Compression → JPEG quality | 50%–100%, in 5% steps | 95% |
