@@ -1,10 +1,12 @@
 Clipboard Avenger
 
-Run Clipboard Avenger.exe. It lives only in the system tray (check the ^ overflow arrow). Right-click its CA-and-sword icon:
+Run Clipboard Avenger.exe. It lives only in the system tray (check the ^ overflow arrow). Left-click its CA-and-sword icon to toggle ON/OFF: OFF darkens it, ON restores it. Right-click for settings:
   ON / OFF: pause or resume clipboard watching.
   --------------------
+  Compression: PNG, JPG (default), WEBP, or Same as Source.
+    --------------------
+    JPEG quality: 50%, 55%, 60%, 65%, 70%, 75%, 80%, 85%, 90%, 95%, or 100%.
   Resize: Don't, 75%, 50%, or 25%.
-  JPEG quality: 50%, 55%, 60%, 65%, 70%, 75%, 80%, 85%, 90%, 95%, or 100%.
   Save:
     Save Original: keep a copy before resizing or compression.
     Save Avenged: keep a copy of the smaller processed image.
@@ -13,13 +15,13 @@ Run Clipboard Avenger.exe. It lives only in the system tray (check the ^ overflo
   Start with Windows: launch automatically when you sign in.
   Exit: quit.
 
-All settings are saved immediately in %LOCALAPPDATA%\Clipboard Avenger\settings.ini and restored when the EXE next runs. With no INI file, the defaults are ON, JPEG quality 95%, Resize Don't, Save Original unchecked, Save Avenged unchecked, and Start with Windows unchecked. Running the EXE twice does not start a second instance.
+All settings are saved immediately in %LOCALAPPDATA%\Clipboard Avenger\settings.ini and restored when the EXE next runs. With no INI file, the defaults are ON, Compression JPG, JPEG quality 95%, Resize Don't, Save Original unchecked, Save Avenged unchecked, and Start with Windows unchecked. Running the EXE twice does not start a second instance.
 
 When upgrading from Desktop Image Avenger, the first renamed launch migrates the previous INI only if the new Clipboard Avenger configuration directory does not yet exist. Existing settings, including Start with Windows, are retained. Deleting the new INI after migration restores the defaults rather than importing the old settings again. Legacy image copies are left in place.
 
 Start with Windows registers this EXE for your Windows account only and needs no administrator permission. Keep the EXE in its chosen location; if you move it, launch it once from its new location to update the startup path. Automatic launches restore every saved option, including ON/OFF. Exit quits the current session without disabling future automatic launches. The renamed app replaces its previous startup registration so Windows does not launch both names.
 
-Every supported clipboard image is considered, including images that are already compressed. There is no minimum size threshold. Resize reduces both width and height to the selected percentage; Don't keeps the original dimensions. Fully opaque source images become JPEG at the selected quality. Lower quality percentages mean stronger compression and lower image quality; they are not a guaranteed percentage reduction in file size. If the source has any transparent pixel, the result uses lossless PNG compression even when resizing. With Resize Don't, PNG preserves all pixels and alpha values; resizing changes the pixel dimensions and values.
+Every supported clipboard image is considered, including images that are already compressed. There is no minimum size threshold. Resize reduces both width and height to the selected percentage; Don't keeps the original dimensions. Compression selects PNG, JPG, WEBP, or Same as Source. JPG is the default and uses the selected JPEG quality. PNG and WEBP use lossless compression. Same as Source retains the detected format; raw Windows bitmaps use BMP. Lower quality percentages mean stronger compression and lower image quality; they are not a guaranteed percentage reduction in file size. Transparency is always preserved: JPG and alpha-unsafe source formats fall back to PNG. WEBP preserves 8-bit transparency; high-depth transparent inputs fall back to PNG to retain their alpha. With Resize Don't, PNG preserves all pixels and alpha values; resizing changes the pixel dimensions and values.
 
 The clipboard is replaced only when the processed file is strictly smaller than the source. Save Avenged also saves only these smaller results. Text and non-image files are ignored. Animated files are skipped to preserve animation. Setting changes apply to future source-image scans; the app skips its own generated copies instead of repeatedly processing them.
 

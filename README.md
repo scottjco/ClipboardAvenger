@@ -4,22 +4,23 @@
 
 A Windows system tray app written in Rust that makes clipboard images smaller before you paste them. It works locally, with no network connections or image uploads.
 
-Opaque images become JPEG at the selected quality. Images with any transparency use lossless PNG compression. The app replaces an image only when the result is strictly smaller, and never overwrites source files. Images paste as file attachments, including in Discord.
+Choose PNG, JPG, WEBP, or Same as Source under Compression. JPG is the default. The app replaces an image only when the result is strictly smaller, and never overwrites source files. Images paste as file attachments, including in Discord.
 
 ## Features and defaults
 
-Right-click the tray icon to change settings. Settings save immediately and restore on the next launch. These defaults apply when no INI file is present:
+Left-click the tray icon to turn watching ON or OFF. OFF uses a darker version of the icon; ON restores the original artwork. Right-click to change settings. Settings save immediately and restore on the next launch, including the matching icon. These defaults apply when no INI file is present:
 
 | Setting | Options | Default |
 | --- | --- | --- |
 | Clipboard watching | ON / OFF | ON |
+| Compression | PNG, JPG, WEBP, Same as Source | JPG |
 | Resize | Don't, 75%, 50%, 25% | Don't |
-| JPEG quality | 50%–100%, in 5% steps | 95% |
+| Compression → JPEG quality | 50%–100%, in 5% steps | 95% |
 | Save Original | Keep an extra copy of the source image | OFF |
 | Save Avenged | Keep an extra copy of a smaller processed image | OFF |
 | Start with Windows | Launch when you sign in | OFF |
 
-Lower JPEG quality means stronger compression; the percentage is not a promised reduction in file size. Resize scales both dimensions. Transparent PNG output preserves pixels and alpha when Resize is set to Don't; resizing changes the dimensions and pixel values.
+Compression appears above Resize. Its four format choices are followed by a separator and the JPEG quality submenu. Lower JPEG quality means stronger JPG compression; the percentage is not a promised reduction in file size. PNG and WEBP use lossless compression, independent of JPEG quality. Same as Source retains the detected input format (raw Windows bitmaps use BMP). Transparency is preserved: JPG and alpha-unsafe source formats fall back to PNG, and high-depth transparent images use PNG rather than reducing their alpha to WebP's 8 bits. Resize scales both dimensions; Don't preserves the original dimensions.
 
 - Text and non-image clipboard content are ignored. Mixed file selections retain non-image files and images that do not shrink.
 - Multiple copied image files are supported. Animated files are skipped to preserve animation.
