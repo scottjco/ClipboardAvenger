@@ -63,3 +63,7 @@ If the chosen custom folder cannot be written to, the app silently falls back to
 Clipboard working copies are separate from optional saved copies and are retained so later pastes and clipboard history can still refer to them. Removing a working copy can make an older paste unavailable.
 
 Start with Windows applies only to your Windows account and needs no administrator permission. If you move the executable, run it once from its new location to update the startup path. Existing settings can be migrated from the app's former name, Desktop Image Avenger; see the [full usage notes](README.txt) for details.
+
+## AI disclosure
+
+This project was made entirely with AI, if you have a problem with that. You do you, I'm not remotely pretending I made this. ChatGPT did it entirely by itself. I just directed it.

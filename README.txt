@@ -42,3 +42,7 @@ Test: cargo test --locked
 Built EXE: target\release\clipboard-avenger.exe
 You can rename your built EXE to Clipboard Avenger.exe and place it in your chosen folder.
 No network connections or image uploads.
+
+AI disclosure
+
+This project was made entirely with AI, if you have a problem with that. You do you, I'm not remotely pretending I made this. ChatGPT did it entirely by itself. I just directed it.
