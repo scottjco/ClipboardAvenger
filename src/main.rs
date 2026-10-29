@@ -717,19 +717,6 @@ unsafe fn tray_menu() -> HMENU {
         compression_menu as usize,
         wide("Compression").as_ptr(),
     );
-    let misc_menu = CreatePopupMenu();
-    AppendMenuW(
-        misc_menu,
-        MF_STRING
-            | if AUTOMATIC_WEBP_TO_PNG.load(Relaxed) {
-                MF_CHECKED
-            } else {
-                0
-            },
-        AUTOMATIC_WEBP_MENU as usize,
-        wide("Automatic WebP to PNG conversion").as_ptr(),
-    );
-    AppendMenuW(menu, MF_POPUP, misc_menu as usize, wide("Misc").as_ptr());
     let resize_menu = CreatePopupMenu();
     let selected_resize = RESIZE.load(Relaxed);
     for resize in [100, 75, 50, 25] {
@@ -756,6 +743,19 @@ unsafe fn tray_menu() -> HMENU {
         resize_menu as usize,
         wide("Resize").as_ptr(),
     );
+    let misc_menu = CreatePopupMenu();
+    AppendMenuW(
+        misc_menu,
+        MF_STRING
+            | if AUTOMATIC_WEBP_TO_PNG.load(Relaxed) {
+                MF_CHECKED
+            } else {
+                0
+            },
+        AUTOMATIC_WEBP_MENU as usize,
+        wide("Automatic WebP to PNG conversion").as_ptr(),
+    );
+    AppendMenuW(menu, MF_POPUP, misc_menu as usize, wide("Misc").as_ptr());
     let save_menu = CreatePopupMenu();
     AppendMenuW(
         save_menu,
@@ -1303,11 +1303,11 @@ mod tests {
                 0
             );
             assert_eq!(GetMenuItemCount(GetSubMenu(compression, 4)), 11);
-            let misc = GetSubMenu(menu, 3);
+            let misc = GetSubMenu(menu, 4);
             assert_eq!(GetMenuItemCount(misc), 1);
             assert_eq!(GetMenuItemID(misc, 0), AUTOMATIC_WEBP_MENU);
             assert_ne!(GetMenuState(misc, 0, MF_BYPOSITION) & MF_CHECKED, 0);
-            let resize = GetSubMenu(menu, 4);
+            let resize = GetSubMenu(menu, 3);
             assert_eq!(GetMenuItemCount(resize), 4);
             for (index, percent) in [100, 75, 50, 25].into_iter().enumerate() {
                 assert_eq!(
