@@ -20,14 +20,14 @@ Left-click the tray icon to turn watching ON or OFF. OFF uses a darker version o
 | --- | --- | --- |
 | Clipboard watching | Turn Off / Turn On (action, no checkmark) | ON |
 | Compression | PNG, JPG, Same as Source | JPG |
-| Misc → Automatic WebP to PNG conversion | Convert WebP for easier pasting into painting apps | ON |
 | Resize | Don't, 75%, 50%, 25% | Don't |
+| Misc → Automatic WebP to PNG conversion | Convert WebP for easier pasting into painting apps | ON |
 | Compression → JPEG quality | 50%–100%, in 5% steps | 95% |
 | Save Original | Keep an extra copy of the source image | OFF |
 | Save Avenged | Keep an extra copy of a compressed or converted result | OFF |
 | Start with Windows | Launch when you sign in | OFF |
 
-The menu order is Compression, Misc, then Resize. Compression's three format choices are followed by a separator and the JPEG quality submenu. Lower JPEG quality means stronger JPG compression; the percentage is not a promised reduction in file size. PNG uses lossless compression, independent of JPEG quality. Resize scales both dimensions; Don't preserves the original dimensions.
+The menu order is Compression, Resize, then Misc. Compression's three format choices are followed by a separator and the JPEG quality submenu. Lower JPEG quality means stronger JPG compression; the percentage is not a promised reduction in file size. PNG uses lossless compression, independent of JPEG quality. Resize scales both dimensions; Don't preserves the original dimensions.
 
 **Misc → Automatic WebP to PNG conversion** is checked by default and saved as `AutomaticWebpToPng` in the INI. When enabled, WebP becomes PNG even if conversion increases the file size. If JPG is selected and every source pixel is fully opaque, the app first tries JPEG at the selected quality: it uses JPEG if smaller, otherwise PNG. Transparent WebP always becomes PNG. Opaque PNG is also eligible for JPEG when JPG is selected, but only if the JPEG is smaller. An alpha channel alone does not make an image transparent; the app checks the pixels before resizing.
 

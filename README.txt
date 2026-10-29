@@ -9,9 +9,9 @@ Run Clipboard Avenger.exe. It lives only in the system tray (check the ^ overflo
   Compression: PNG, JPG (default), or Same as Source.
     --------------------
     JPEG quality: 50%, 55%, 60%, 65%, 70%, 75%, 80%, 85%, 90%, 95%, or 100%.
+  Resize: Don't, 75%, 50%, or 25%.
   Misc:
     Automatic WebP to PNG conversion: checked by default; convert WebP for easier pasting into painting apps.
-  Resize: Don't, 75%, 50%, or 25%.
   Save:
     Save Original: keep a copy before resizing or compression.
     Save Avenged: keep a copy of the compressed or converted result.
@@ -28,7 +28,7 @@ Start with Windows registers this EXE for your Windows account only and needs no
 
 Every supported clipboard image is considered, including images that are already compressed. There is no minimum size threshold. Resize reduces both width and height to the selected percentage; Don't keeps the original dimensions. Compression selects PNG, JPG, or Same as Source. JPG is the default and uses the selected JPEG quality. PNG uses lossless compression. Lower quality percentages mean stronger compression and lower image quality; they are not a guaranteed percentage reduction in file size. Transparency is always preserved: JPG and alpha-unsafe source formats fall back to PNG. With Resize Don't, PNG preserves decoded pixels and alpha values; resizing changes the pixel dimensions and values.
 
-Misc appears after Compression and before Resize. Its Automatic WebP to PNG conversion checkbox is on by default. When enabled, WebP becomes PNG even if the PNG is larger. If JPG is selected and all source pixels are fully opaque, a smaller JPEG is used instead; if JPEG does not shrink the image, WebP still becomes PNG. Transparent WebP always becomes PNG. Opaque PNG can also become JPEG when JPG is selected, but only if JPEG is smaller. The app checks actual alpha values before resizing; an alpha channel whose pixels are all opaque does not prevent JPEG conversion.
+Misc appears after Resize and before Save. Its Automatic WebP to PNG conversion checkbox is on by default. When enabled, WebP becomes PNG even if the PNG is larger. If JPG is selected and all source pixels are fully opaque, a smaller JPEG is used instead; if JPEG does not shrink the image, WebP still becomes PNG. Transparent WebP always becomes PNG. Opaque PNG can also become JPEG when JPG is selected, but only if JPEG is smaller. The app checks actual alpha values before resizing; an alpha channel whose pixels are all opaque does not prevent JPEG conversion.
 
 Outside automatic WebP conversion, the clipboard is replaced only when the processed file is strictly smaller than the source. With the checkbox off, Same as Source retains the detected format, including WebP; raw Windows bitmaps use BMP. Save Avenged saves results chosen for replacement, including WebP conversions that are larger than the original. Text and non-image files are ignored. Animated files are skipped to preserve animation. Setting changes apply to future source-image scans; the app skips its own generated copies instead of repeatedly processing them, except for a one-time WebP conversion that preserves the already-processed dimensions.
 
