@@ -1,6 +1,6 @@
 # Clipboard Avenger
 
-**Version 1.0.2 · Windows · Source only**
+**Version 1.0.3 · Windows · Source only**
 
 <img src="clipboard-avenger.png" alt="Clipboard Avenger CA and sword icon" width="160">
 
@@ -8,9 +8,9 @@ A Windows system tray app written in Rust that makes clipboard images smaller be
 
 This repository contains the Rust source, build files, and icon assets. **No prebuilt EXE is provided. You must build the app yourself on Windows** using the instructions below.
 
-Choose PNG, JPG, WEBP, or Same as Source under Compression. JPG is the default. The app replaces an image only when the result is strictly smaller, and never overwrites source files. Images paste as file attachments, including in Discord.
+Choose PNG, JPG, or Same as Source under Compression. JPG is the default. Normal compression replaces an image only when the result is strictly smaller. Automatic WebP conversion can replace WebP with PNG even when PNG is larger, to make the image easier to paste into painting apps. Source files are never overwritten. Images paste as file attachments, including in Discord.
 
-Version 1.0.2 includes native bitmap clipboard support for painting apps alongside compressed file attachments. It also includes the Turn On / Turn Off tray action, left-click toggling, selectable compression, resizing, saved copies, and Windows startup settings.
+Version 1.0.3 adds automatic WebP conversion under Misc and removes WebP from the compression choices. Native bitmap clipboard support remains available for painting apps alongside file attachments, with transparency preserved.
 
 ## Features and defaults
 
@@ -19,16 +19,21 @@ Left-click the tray icon to turn watching ON or OFF. OFF uses a darker version o
 | Setting | Options | Default |
 | --- | --- | --- |
 | Clipboard watching | Turn Off / Turn On (action, no checkmark) | ON |
-| Compression | PNG, JPG, WEBP, Same as Source | JPG |
+| Compression | PNG, JPG, Same as Source | JPG |
+| Misc → Automatic WebP to PNG conversion | Convert WebP for easier pasting into painting apps | ON |
 | Resize | Don't, 75%, 50%, 25% | Don't |
 | Compression → JPEG quality | 50%–100%, in 5% steps | 95% |
 | Save Original | Keep an extra copy of the source image | OFF |
-| Save Avenged | Keep an extra copy of a smaller processed image | OFF |
+| Save Avenged | Keep an extra copy of a compressed or converted result | OFF |
 | Start with Windows | Launch when you sign in | OFF |
 
-Compression appears above Resize. Its four format choices are followed by a separator and the JPEG quality submenu. Lower JPEG quality means stronger JPG compression; the percentage is not a promised reduction in file size. PNG and WEBP use lossless compression, independent of JPEG quality. Same as Source retains the detected input format (raw Windows bitmaps use BMP). Transparency is preserved: JPG and alpha-unsafe source formats fall back to PNG, and high-depth transparent images use PNG rather than reducing their alpha to WebP's 8 bits. Resize scales both dimensions; Don't preserves the original dimensions.
+The menu order is Compression, Misc, then Resize. Compression's three format choices are followed by a separator and the JPEG quality submenu. Lower JPEG quality means stronger JPG compression; the percentage is not a promised reduction in file size. PNG uses lossless compression, independent of JPEG quality. Resize scales both dimensions; Don't preserves the original dimensions.
 
-- Text and non-image clipboard content are ignored. Mixed file selections retain non-image files and images that do not shrink.
+**Misc → Automatic WebP to PNG conversion** is checked by default and saved as `AutomaticWebpToPng` in the INI. When enabled, WebP becomes PNG even if conversion increases the file size. If JPG is selected and every source pixel is fully opaque, the app first tries JPEG at the selected quality: it uses JPEG if smaller, otherwise PNG. Transparent WebP always becomes PNG. Opaque PNG is also eligible for JPEG when JPG is selected, but only if the JPEG is smaller. An alpha channel alone does not make an image transparent; the app checks the pixels before resizing.
+
+With automatic WebP conversion off, all replacements must be smaller. Same as Source retains the detected input format, including WebP (raw Windows bitmaps use BMP). Transparency is always preserved: JPG and alpha-unsafe source formats fall back to PNG. With Resize set to Don't, PNG preserves the decoded pixels and alpha values. An older saved `Compression=WEBP` setting now loads as JPG.
+
+- Text and non-image clipboard content are ignored. Mixed file selections retain non-image files and images that are neither compressed nor converted.
 - Multiple copied image files are supported. Animated files are skipped to preserve animation.
 - A single image also offers standard Windows bitmap formats for painting apps, alongside the compressed file attachment. The bitmap represents the processed image, including its resized dimensions and transparency.
 - A single scan runs at a time, recent scanned content is cached, and clipboard changes during processing cancel replacement of the old selection.
@@ -56,7 +61,7 @@ Run the EXE you built at `target\release\clipboard-avenger.exe`. It appears in t
 | Clipboard working copies | Your Windows Pictures folder, under `Clipboard Avenger\Clipboard` |
 | Optional saved copies | `Saved` beside the executable, or the folder selected through **Save → ...** |
 
-Original and avenged archive copies share the same folder, with `original-` and `avenged-` filename prefixes. Encoded originals are copied untouched; raw clipboard bitmaps are saved as PNG. Save Avenged archives only results that are smaller than the source.
+Original and avenged archive copies share the same folder, with `original-` and `avenged-` filename prefixes. Encoded originals are copied untouched; raw clipboard bitmaps are saved as PNG. Save Avenged archives results selected for clipboard replacement, including automatic WebP conversions that are larger than the source.
 
 If the chosen custom folder cannot be written to, the app silently falls back to `Saved` beside the executable for that copy. It counts one failure per image save batch. After ten failed attempts, it clears the custom folder setting. The failure count persists across restarts and resets when another folder is chosen. Save failures do not interrupt clipboard processing.
 
@@ -66,7 +71,15 @@ Start with Windows applies only to your Windows account and needs no administrat
 
 ## Changelog
 
-### 1.0.2 — Current release
+### 1.0.3 — Current release
+
+- Removed WEBP from the Compression choices. Existing saved WEBP selections now load as JPG.
+- Added **Misc** between Compression and Resize, with a checked-by-default **Automatic WebP to PNG conversion** option that is remembered in the INI.
+- Automatic conversion replaces WebP with PNG even when PNG is larger, preserving transparency for painting-app compatibility. If JPG is selected, fully opaque WebP uses JPEG instead when it is smaller; otherwise it becomes PNG.
+- Checks actual source alpha values before resizing. Fully opaque PNG can become a smaller JPEG when JPG is selected; any transparent pixels keep an alpha-safe format.
+- Kept native bitmap clipboard support for painting apps, and included converted results in Save Avenged.
+
+### 1.0.2
 
 Changes since the initial source release:
 
