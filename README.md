@@ -22,6 +22,7 @@ Left-click the tray icon to turn watching ON or OFF. OFF uses a darker version o
 | Compression | PNG, JPG, Same as Source | JPG |
 | Resize | Don't, 75%, 50%, 25% | Don't |
 | Misc → Automatic WebP to PNG conversion | Convert WebP for easier pasting into painting apps | ON |
+| Misc → Convert opaque png/webp files to jpg if smaller | Allow smaller JPEG output for opaque PNG/WebP when JPG is selected | ON |
 | Compression → JPEG quality | 50%–100%, in 5% steps | 95% |
 | Save Original | Keep an extra copy of the source image | OFF |
 | Save Avenged | Keep an extra copy of a compressed or converted result | OFF |
@@ -29,7 +30,9 @@ Left-click the tray icon to turn watching ON or OFF. OFF uses a darker version o
 
 The menu order is Compression, Resize, then Misc. Compression's three format choices are followed by a separator and the JPEG quality submenu. Lower JPEG quality means stronger JPG compression; the percentage is not a promised reduction in file size. PNG uses lossless compression, independent of JPEG quality. Resize scales both dimensions; Don't preserves the original dimensions.
 
-**Misc → Automatic WebP to PNG conversion** is checked by default and saved as `AutomaticWebpToPng` in the INI. When enabled, WebP becomes PNG even if conversion increases the file size. If JPG is selected and every source pixel is fully opaque, the app first tries JPEG at the selected quality: it uses JPEG if smaller, otherwise PNG. Transparent WebP always becomes PNG. Opaque PNG is also eligible for JPEG when JPG is selected, but only if the JPEG is smaller. An alpha channel alone does not make an image transparent; the app checks the pixels before resizing.
+**Misc → Automatic WebP to PNG conversion** is checked by default and saved as `AutomaticWebpToPng` in the INI. When enabled, WebP becomes PNG even if conversion increases the file size. A smaller JPEG takes priority only when JPG is selected and the opaque-image conversion option below is enabled. Transparent WebP always becomes PNG.
+
+**Misc → Convert opaque png/webp files to jpg if smaller** is checked by default and saved as `ConvertOpaqueToJpg` in the INI. With JPG selected, it lets PNG and WebP images become JPEG at the selected quality only when every source pixel is fully opaque and the JPEG is smaller. It does not override PNG or Same as Source selections. Turning it off prevents PNG/WebP-to-JPEG conversion: PNG stays PNG, and WebP becomes PNG if automatic WebP conversion is on, otherwise it retains its source format when JPG or Same as Source is selected. Normal replacements still require a smaller result; automatic WebP-to-PNG conversion remains the exception. An alpha channel alone does not make an image transparent; the app checks the pixels before resizing. Both Misc options default to on when absent from an older INI.
 
 With automatic WebP conversion off, all replacements must be smaller. Same as Source retains the detected input format, including WebP (raw Windows bitmaps use BMP). Transparency is always preserved: JPG and alpha-unsafe source formats fall back to PNG. With Resize set to Don't, PNG preserves the decoded pixels and alpha values. An older saved `Compression=WEBP` setting now loads as JPG.
 
@@ -75,8 +78,9 @@ Start with Windows applies only to your Windows account and needs no administrat
 
 - Removed WEBP from the Compression choices. Existing saved WEBP selections now load as JPG.
 - Added **Misc** between Compression and Resize, with a checked-by-default **Automatic WebP to PNG conversion** option that is remembered in the INI.
-- Automatic conversion replaces WebP with PNG even when PNG is larger, preserving transparency for painting-app compatibility. If JPG is selected, fully opaque WebP uses JPEG instead when it is smaller; otherwise it becomes PNG.
-- Checks actual source alpha values before resizing. Fully opaque PNG can become a smaller JPEG when JPG is selected; any transparent pixels keep an alpha-safe format.
+- Added **Convert opaque png/webp files to jpg if smaller** under Misc, enabled by default and remembered in the INI. It controls opaque PNG/WebP-to-JPEG conversion when JPG is selected; turning it off keeps these inputs out of JPEG.
+- Automatic conversion replaces WebP with PNG even when PNG is larger, preserving transparency for painting-app compatibility. If JPG and opaque-image conversion are enabled, fully opaque WebP uses JPEG instead when it is smaller; otherwise it becomes PNG.
+- Checks actual source alpha values before resizing. Fully opaque PNG can become a smaller JPEG when JPG and opaque-image conversion are enabled; any transparent pixels keep an alpha-safe format.
 - Kept native bitmap clipboard support for painting apps, and included converted results in Save Avenged.
 
 ### 1.0.2
