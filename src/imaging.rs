@@ -156,6 +156,7 @@ pub fn encoded(
         Compression::Jpg,
         image::ImageFormat::Bmp,
         false,
+        true,
     )
 }
 
@@ -167,6 +168,7 @@ pub fn encoded_as(
     compression: Compression,
     source: image::ImageFormat,
     automatic_webp_to_png: bool,
+    convert_opaque_to_jpg: bool,
 ) -> Option<Encoded> {
     if !matches!(resize_percent, 25 | 50 | 75 | 100) || img.width() == 0 || img.height() == 0 {
         return None;
@@ -184,9 +186,18 @@ pub fn encoded_as(
         Compression::Jpg => image::ImageFormat::Jpeg,
         Compression::Source => source,
     };
+    // Turning off opaque conversion keeps PNG/WebP out of the JPEG encoder,
+    // even when JPG is selected for bitmaps and other source formats.
+    if compression == Compression::Jpg
+        && !convert_opaque_to_jpg
+        && matches!(source, image::ImageFormat::Png | image::ImageFormat::WebP)
+    {
+        format = source;
+    }
     // The conversion checkbox takes priority over Same as Source. Opaque
-    // WebP can still use a smaller JPEG when that is the selected output.
-    if convert_webp && (transparent || compression != Compression::Jpg) {
+    // WebP can use a smaller JPEG only when both JPG and opaque conversion
+    // are selected. Otherwise automatic WebP conversion produces PNG.
+    if convert_webp && (transparent || format != image::ImageFormat::Jpeg) {
         format = image::ImageFormat::Png;
     }
     if transparent
@@ -325,6 +336,132 @@ mod tests {
     }
 
     #[test]
+    fn opaque_conversion_checkbox_controls_png_and_webp_without_overriding_output_choice() {
+        let mut seed = 0x19283746u32;
+        let img = DynamicImage::ImageRgba8(RgbaImage::from_fn(128, 128, |_, _| {
+            let mut pixel = [0, 0, 0, 255];
+            for channel in &mut pixel[..3] {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                *channel = seed as u8;
+            }
+            image::Rgba(pixel)
+        }));
+        for source in [image::ImageFormat::Png, image::ImageFormat::WebP] {
+            let input = source_bytes(&img, source);
+            let decoded = image::load_from_memory(&input).unwrap();
+            for compression in [Compression::Png, Compression::Jpg, Compression::Source] {
+                for automatic_webp in [false, true] {
+                    for opaque_jpg in [false, true] {
+                        let expected = if compression == Compression::Jpg && opaque_jpg {
+                            image::ImageFormat::Jpeg
+                        } else if compression == Compression::Png
+                            || (source == image::ImageFormat::WebP && automatic_webp)
+                        {
+                            image::ImageFormat::Png
+                        } else {
+                            source
+                        };
+                        let candidate = encoded_as(
+                            &decoded,
+                            usize::MAX,
+                            95,
+                            100,
+                            compression,
+                            source,
+                            automatic_webp,
+                            opaque_jpg,
+                        )
+                        .unwrap();
+                        assert_eq!(image::guess_format(&candidate.bytes).unwrap(), expected);
+                        let selected = encoded_as(
+                            &decoded,
+                            input.len(),
+                            95,
+                            100,
+                            compression,
+                            source,
+                            automatic_webp,
+                            opaque_jpg,
+                        );
+                        if expected == image::ImageFormat::Jpeg {
+                            let selected = selected.unwrap();
+                            assert_eq!(selected.extension, "jpg");
+                            assert!(selected.bytes.len() < input.len());
+                        } else if source == image::ImageFormat::WebP && automatic_webp {
+                            assert_eq!(selected.unwrap().extension, "png");
+                        } else {
+                            assert_eq!(selected.is_some(), candidate.bytes.len() < input.len());
+                            if let Some(selected) = selected {
+                                assert_eq!(image::guess_format(&selected.bytes).unwrap(), expected);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn either_opaque_checkbox_state_preserves_transparency() {
+        let mut rgba = RgbaImage::from_pixel(7, 5, image::Rgba([30, 120, 220, 255]));
+        rgba.put_pixel(3, 2, image::Rgba([30, 120, 220, 254]));
+        let img = DynamicImage::ImageRgba8(rgba);
+        for source in [image::ImageFormat::Png, image::ImageFormat::WebP] {
+            let input = source_bytes(&img, source);
+            let decoded = image::load_from_memory(&input).unwrap();
+            for compression in [Compression::Png, Compression::Jpg, Compression::Source] {
+                for automatic_webp in [false, true] {
+                    for opaque_jpg in [false, true] {
+                        let out = encoded_as(
+                            &decoded,
+                            usize::MAX,
+                            95,
+                            100,
+                            compression,
+                            source,
+                            automatic_webp,
+                            opaque_jpg,
+                        )
+                        .unwrap();
+                        assert_ne!(out.extension, "jpg");
+                        assert_eq!(
+                            image::load_from_memory(&out.bytes).unwrap().to_rgba8(),
+                            decoded.to_rgba8(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn opaque_checkbox_does_not_disable_jpeg_compression_for_bitmap_or_jpeg_sources() {
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            64,
+            48,
+            image::Rgb([30, 120, 220]),
+        ));
+        for source in [image::ImageFormat::Bmp, image::ImageFormat::Jpeg] {
+            for opaque_jpg in [false, true] {
+                let out = encoded_as(
+                    &img,
+                    usize::MAX,
+                    95,
+                    100,
+                    Compression::Jpg,
+                    source,
+                    true,
+                    opaque_jpg,
+                )
+                .unwrap();
+                assert_eq!(out.extension, "jpg");
+            }
+        }
+    }
+
+    #[test]
     fn opaque_png_and_webp_become_smaller_jpegs_even_with_an_alpha_channel() {
         let mut seed = 0x19283746u32;
         let img = DynamicImage::ImageRgba8(RgbaImage::from_fn(128, 128, |_, _| {
@@ -351,6 +488,7 @@ mod tests {
                     Compression::Jpg,
                     format,
                     automatic,
+                    true,
                 )
                 .unwrap();
                 assert_eq!(output.extension, "jpg");
@@ -383,6 +521,7 @@ mod tests {
                 compression,
                 image::ImageFormat::WebP,
                 true,
+                true,
             )
             .unwrap();
             assert_eq!(output.extension, "png");
@@ -399,6 +538,7 @@ mod tests {
                 compression,
                 image::ImageFormat::WebP,
                 false,
+                true,
             )
             .is_none());
         }
@@ -421,6 +561,7 @@ mod tests {
             Compression::Jpg,
             image::ImageFormat::WebP,
             false,
+            true,
         )
         .is_none());
         let output = encoded_as(
@@ -430,6 +571,7 @@ mod tests {
             100,
             Compression::Jpg,
             image::ImageFormat::WebP,
+            true,
             true,
         )
         .unwrap();
@@ -457,6 +599,7 @@ mod tests {
                     Compression::Jpg,
                     format,
                     true,
+                    true,
                 )
                 .unwrap();
                 assert_eq!(output.extension, "png");
@@ -478,9 +621,17 @@ mod tests {
             image::Rgba([30, 120, 220, 127]),
         ));
         for compression in [Compression::Png, Compression::Jpg, Compression::Source] {
-            assert!(
-                encoded_as(&img, 1, 95, 100, compression, image::ImageFormat::Png, true,).is_none()
-            );
+            assert!(encoded_as(
+                &img,
+                1,
+                95,
+                100,
+                compression,
+                image::ImageFormat::Png,
+                true,
+                true,
+            )
+            .is_none());
         }
     }
 
@@ -523,13 +674,22 @@ mod tests {
                 image::ImageFormat::Bmp,
             ),
         ] {
-            let out = encoded_as(&img, usize::MAX, 95, 50, compression, source, false).unwrap();
+            let out =
+                encoded_as(&img, usize::MAX, 95, 50, compression, source, false, true).unwrap();
             assert_eq!(image::guess_format(&out.bytes).unwrap(), expected);
             let decoded = image::load_from_memory(&out.bytes).unwrap();
             assert_eq!((decoded.width(), decoded.height()), (32, 24));
-            assert!(
-                encoded_as(&img, out.bytes.len(), 95, 50, compression, source, false).is_none()
-            );
+            assert!(encoded_as(
+                &img,
+                out.bytes.len(),
+                95,
+                50,
+                compression,
+                source,
+                false,
+                true
+            )
+            .is_none());
         }
     }
     #[test]
@@ -547,6 +707,7 @@ mod tests {
                 compression,
                 image::ImageFormat::Png,
                 false,
+                true,
             )
             .unwrap();
             let decoded = image::load_from_memory(&out.bytes).unwrap().to_rgba8();

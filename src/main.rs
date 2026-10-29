@@ -27,6 +27,7 @@ static ENABLED: AtomicBool = AtomicBool::new(true);
 static QUALITY: AtomicU32 = AtomicU32::new(95);
 static COMPRESSION: AtomicU32 = AtomicU32::new(Compression::Jpg as u32);
 static AUTOMATIC_WEBP_TO_PNG: AtomicBool = AtomicBool::new(true);
+static CONVERT_OPAQUE_TO_JPG: AtomicBool = AtomicBool::new(true);
 static START_WITH_WINDOWS: AtomicBool = AtomicBool::new(false);
 static RESIZE: AtomicU32 = AtomicU32::new(100);
 static SAVE_ORIGINAL: AtomicBool = AtomicBool::new(false);
@@ -43,12 +44,14 @@ const QUALITY_MENU_BASE: u32 = 1000;
 const RESIZE_MENU_BASE: u32 = 2000;
 const COMPRESSION_MENU_BASE: u32 = 3000;
 const AUTOMATIC_WEBP_MENU: u32 = 7;
+const CONVERT_OPAQUE_MENU: u32 = 8;
 #[derive(Debug, PartialEq)]
 struct Settings {
     enabled: bool,
     jpeg_quality: u8,
     compression: Compression,
     automatic_webp_to_png: bool,
+    convert_opaque_to_jpg: bool,
     start_with_windows: bool,
     resize_percent: u8,
     save_original: bool,
@@ -63,6 +66,7 @@ impl Default for Settings {
             jpeg_quality: 95,
             compression: Compression::Jpg,
             automatic_webp_to_png: true,
+            convert_opaque_to_jpg: true,
             start_with_windows: false,
             resize_percent: 100,
             save_original: false,
@@ -116,6 +120,10 @@ impl Settings {
                 if let Some(value) = parse_bool(value) {
                     settings.automatic_webp_to_png = value;
                 }
+            } else if key.trim().eq_ignore_ascii_case("ConvertOpaqueToJpg") {
+                if let Some(value) = parse_bool(value) {
+                    settings.convert_opaque_to_jpg = value;
+                }
             } else if key.trim().eq_ignore_ascii_case("SaveAvenged") {
                 if let Some(value) = parse_bool(value) {
                     settings.save_avenged = value;
@@ -147,7 +155,7 @@ impl Settings {
         settings
     }
     fn to_ini(&self) -> String {
-        format!("; Clipboard Avenger settings\n; JPEG quality applies to JPG. PNG uses lossless compression.\n; AutomaticWebpToPng converts WebP even if PNG is larger. Smaller opaque JPG takes priority.\n; ResizePercent=100 means Don't. Empty SaveFolder uses Saved beside the EXE.\n[Settings]\nEnabled={}\nCompression={}\nAutomaticWebpToPng={}\nJpegQuality={}\nResizePercent={}\nSaveOriginal={}\nSaveAvenged={}\nSaveFolder={}\nSaveFolderFailures={}\nStartWithWindows={}\n", self.enabled, self.compression.label(), self.automatic_webp_to_png, self.jpeg_quality, self.resize_percent, self.save_original, self.save_avenged, self.save_folder, self.folder_failures, self.start_with_windows)
+        format!("; Clipboard Avenger settings\n; JPEG quality applies to JPG. PNG uses lossless compression.\n; AutomaticWebpToPng converts WebP even if PNG is larger.\n; ConvertOpaqueToJpg allows smaller opaque PNG/WebP-to-JPG conversions when JPG is selected.\n; ResizePercent=100 means Don't. Empty SaveFolder uses Saved beside the EXE.\n[Settings]\nEnabled={}\nCompression={}\nAutomaticWebpToPng={}\nConvertOpaqueToJpg={}\nJpegQuality={}\nResizePercent={}\nSaveOriginal={}\nSaveAvenged={}\nSaveFolder={}\nSaveFolderFailures={}\nStartWithWindows={}\n", self.enabled, self.compression.label(), self.automatic_webp_to_png, self.convert_opaque_to_jpg, self.jpeg_quality, self.resize_percent, self.save_original, self.save_avenged, self.save_folder, self.folder_failures, self.start_with_windows)
     }
 }
 fn parse_bool(value: &str) -> Option<bool> {
@@ -205,6 +213,7 @@ fn save() {
         jpeg_quality: QUALITY.load(Relaxed) as u8,
         compression: Compression::from_id(COMPRESSION.load(Relaxed)),
         automatic_webp_to_png: AUTOMATIC_WEBP_TO_PNG.load(Relaxed),
+        convert_opaque_to_jpg: CONVERT_OPAQUE_TO_JPG.load(Relaxed),
         start_with_windows: START_WITH_WINDOWS.load(Relaxed),
         resize_percent: RESIZE.load(Relaxed) as u8,
         save_original: SAVE_ORIGINAL.load(Relaxed),
@@ -251,6 +260,7 @@ struct ScanOptions {
     quality: u8,
     compression: Compression,
     automatic_webp_to_png: bool,
+    convert_opaque_to_jpg: bool,
     resize_percent: u8,
     save_original: bool,
     save_avenged: bool,
@@ -263,6 +273,7 @@ impl ScanOptions {
             quality: QUALITY.load(Relaxed) as u8,
             compression: Compression::from_id(COMPRESSION.load(Relaxed)),
             automatic_webp_to_png: AUTOMATIC_WEBP_TO_PNG.load(Relaxed),
+            convert_opaque_to_jpg: CONVERT_OPAQUE_TO_JPG.load(Relaxed),
             resize_percent: RESIZE.load(Relaxed) as u8,
             save_original: SAVE_ORIGINAL.load(Relaxed),
             save_avenged: SAVE_AVENGED.load(Relaxed),
@@ -374,10 +385,11 @@ fn archive_images(
 }
 fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
     let key = format!(
-        "{}-c{}-w{}",
+        "{}-c{}-w{}-j{}",
         cache_key(data, dib, options.quality, options.resize_percent),
         options.compression as u32,
-        options.automatic_webp_to_png
+        options.automatic_webp_to_png,
+        options.convert_opaque_to_jpg
     );
     // Archiving preferences also affect scan results, including a no-shrink
     // image whose original still needs saving after Save Original is enabled.
@@ -435,6 +447,7 @@ fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
             options.compression,
             source,
             options.automatic_webp_to_png,
+            options.convert_opaque_to_jpg,
         );
         if !options.active() {
             return None;
@@ -755,6 +768,17 @@ unsafe fn tray_menu() -> HMENU {
         AUTOMATIC_WEBP_MENU as usize,
         wide("Automatic WebP to PNG conversion").as_ptr(),
     );
+    AppendMenuW(
+        misc_menu,
+        MF_STRING
+            | if CONVERT_OPAQUE_TO_JPG.load(Relaxed) {
+                MF_CHECKED
+            } else {
+                0
+            },
+        CONVERT_OPAQUE_MENU as usize,
+        wide("Convert opaque png/webp files to jpg if smaller").as_ptr(),
+    );
     AppendMenuW(menu, MF_POPUP, misc_menu as usize, wide("Misc").as_ptr());
     let save_menu = CreatePopupMenu();
     AppendMenuW(
@@ -902,6 +926,10 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                     }
                     cmd if cmd as u32 == AUTOMATIC_WEBP_MENU => {
                         AUTOMATIC_WEBP_TO_PNG.fetch_xor(true, Relaxed);
+                        options_changed();
+                    }
+                    cmd if cmd as u32 == CONVERT_OPAQUE_MENU => {
+                        CONVERT_OPAQUE_TO_JPG.fetch_xor(true, Relaxed);
                         options_changed();
                     }
                     cmd if [
@@ -1062,6 +1090,7 @@ fn main() {
         QUALITY.store(settings.jpeg_quality as u32, Relaxed);
         COMPRESSION.store(settings.compression as u32, Relaxed);
         AUTOMATIC_WEBP_TO_PNG.store(settings.automatic_webp_to_png, Relaxed);
+        CONVERT_OPAQUE_TO_JPG.store(settings.convert_opaque_to_jpg, Relaxed);
         RESIZE.store(settings.resize_percent as u32, Relaxed);
         SAVE_ORIGINAL.store(settings.save_original, Relaxed);
         SAVE_AVENGED.store(settings.save_avenged, Relaxed);
@@ -1304,9 +1333,11 @@ mod tests {
             );
             assert_eq!(GetMenuItemCount(GetSubMenu(compression, 4)), 11);
             let misc = GetSubMenu(menu, 4);
-            assert_eq!(GetMenuItemCount(misc), 1);
+            assert_eq!(GetMenuItemCount(misc), 2);
             assert_eq!(GetMenuItemID(misc, 0), AUTOMATIC_WEBP_MENU);
             assert_ne!(GetMenuState(misc, 0, MF_BYPOSITION) & MF_CHECKED, 0);
+            assert_eq!(GetMenuItemID(misc, 1), CONVERT_OPAQUE_MENU);
+            assert_ne!(GetMenuState(misc, 1, MF_BYPOSITION) & MF_CHECKED, 0);
             let resize = GetSubMenu(menu, 3);
             assert_eq!(GetMenuItemCount(resize), 4);
             for (index, percent) in [100, 75, 50, 25].into_iter().enumerate() {
@@ -1360,6 +1391,28 @@ mod tests {
         );
     }
     #[test]
+    fn opaque_jpg_option_is_independent_and_remembered_in_ini() {
+        assert!(Settings::from_ini("[Settings]\nJpegQuality=80\n").convert_opaque_to_jpg);
+        for convert_opaque_to_jpg in [false, true] {
+            for automatic_webp_to_png in [false, true] {
+                let settings = Settings {
+                    convert_opaque_to_jpg,
+                    automatic_webp_to_png,
+                    jpeg_quality: 80,
+                    ..Settings::default()
+                };
+                assert_eq!(Settings::from_ini(&settings.to_ini()), settings);
+            }
+        }
+        assert!(!Settings::from_ini("[Settings]\nConvertOpaqueToJpg=0\n").convert_opaque_to_jpg);
+        assert!(
+            !Settings::from_ini("[Settings]\nConvertOpaqueToJpg=FALSE\n").convert_opaque_to_jpg
+        );
+        assert!(
+            Settings::from_ini("[Settings]\nConvertOpaqueToJpg=invalid\n").convert_opaque_to_jpg
+        );
+    }
+    #[test]
     fn generated_webp_can_be_converted_without_reprocessing_our_jpg_or_png() {
         for name in ["generated.webp", "generated.WEBP"] {
             assert!(convert_generated_webp(std::path::Path::new(name), true));
@@ -1385,6 +1438,7 @@ mod tests {
             quality: 95,
             compression: Compression::Jpg,
             automatic_webp_to_png: true,
+            convert_opaque_to_jpg: true,
             resize_percent: 50,
             save_original: false,
             save_avenged: false,
@@ -1401,6 +1455,7 @@ mod tests {
                 options.compression,
                 image::ImageFormat::WebP,
                 options.automatic_webp_to_png,
+                options.convert_opaque_to_jpg,
             )
             .unwrap();
             assert_eq!(out.extension, "png");

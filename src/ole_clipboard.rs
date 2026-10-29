@@ -407,6 +407,7 @@ mod tests {
             crate::imaging::Compression::Jpg,
             image::ImageFormat::WebP,
             true,
+            true,
         )
         .unwrap();
         assert_eq!(converted.extension, "png");
