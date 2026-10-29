@@ -388,6 +388,68 @@ pub unsafe fn publish(prepared: &Prepared) -> Result<(), HRESULT> {
 mod tests {
     use super::*;
     #[test]
+    fn converted_webp_provides_png_attachment_and_matching_alpha_bitmap() {
+        let original = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            3,
+            2,
+            image::Rgba([50, 100, 150, 127]),
+        ));
+        let mut webp = std::io::Cursor::new(Vec::new());
+        original
+            .write_to(&mut webp, image::ImageFormat::WebP)
+            .unwrap();
+        let decoded = image::load_from_memory(webp.get_ref()).unwrap();
+        let converted = crate::imaging::encoded_as(
+            &decoded,
+            webp.get_ref().len(),
+            95,
+            100,
+            crate::imaging::Compression::Jpg,
+            image::ImageFormat::WebP,
+            true,
+        )
+        .unwrap();
+        assert_eq!(converted.extension, "png");
+        let dir =
+            std::env::temp_dir().join(format!("avenger-webp-ole-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("converted.png");
+        std::fs::write(&path, &converted.bytes).unwrap();
+        let prepared = prepare(&[path.clone()]).unwrap();
+        assert_eq!(prepared.entries[0].format, 15);
+        for name in ["FileContents", "PNG"] {
+            let entry = prepared
+                .entries
+                .iter()
+                .find(|e| e.format == format(name))
+                .unwrap();
+            assert_eq!(entry.data, converted.bytes);
+        }
+        let descriptor = prepared
+            .entries
+            .iter()
+            .find(|e| e.format == format("FileGroupDescriptorW"))
+            .unwrap();
+        assert_eq!(
+            u32::from_le_bytes(descriptor.data[72..76].try_into().unwrap()) as usize,
+            converted.bytes.len()
+        );
+        let filename: Vec<u16> = descriptor.data[76..]
+            .chunks_exact(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .take_while(|&c| c != 0)
+            .collect();
+        assert_eq!(String::from_utf16(&filename).unwrap(), "converted.png");
+        let v5 = prepared.entries.iter().find(|e| e.format == 17).unwrap();
+        assert_eq!(
+            crate::imaging::dib_image(&v5.data).unwrap().to_rgba8(),
+            decoded.to_rgba8()
+        );
+        assert!(prepared.entries.iter().any(|e| e.format == 8));
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
     fn jpeg_attachment_also_offers_native_bitmaps_with_correct_rows_and_colors() {
         use image::ImageEncoder;
         // An odd width exercises DWORD row padding in the legacy 24-bit DIB.

@@ -26,6 +26,7 @@ use windows_sys::Win32::{
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static QUALITY: AtomicU32 = AtomicU32::new(95);
 static COMPRESSION: AtomicU32 = AtomicU32::new(Compression::Jpg as u32);
+static AUTOMATIC_WEBP_TO_PNG: AtomicBool = AtomicBool::new(true);
 static START_WITH_WINDOWS: AtomicBool = AtomicBool::new(false);
 static RESIZE: AtomicU32 = AtomicU32::new(100);
 static SAVE_ORIGINAL: AtomicBool = AtomicBool::new(false);
@@ -41,11 +42,13 @@ static SETTINGS_WRITE: Mutex<()> = Mutex::new(());
 const QUALITY_MENU_BASE: u32 = 1000;
 const RESIZE_MENU_BASE: u32 = 2000;
 const COMPRESSION_MENU_BASE: u32 = 3000;
+const AUTOMATIC_WEBP_MENU: u32 = 7;
 #[derive(Debug, PartialEq)]
 struct Settings {
     enabled: bool,
     jpeg_quality: u8,
     compression: Compression,
+    automatic_webp_to_png: bool,
     start_with_windows: bool,
     resize_percent: u8,
     save_original: bool,
@@ -59,6 +62,7 @@ impl Default for Settings {
             enabled: true,
             jpeg_quality: 95,
             compression: Compression::Jpg,
+            automatic_webp_to_png: true,
             start_with_windows: false,
             resize_percent: 100,
             save_original: false,
@@ -108,6 +112,10 @@ impl Settings {
                 if let Some(value) = parse_bool(value) {
                     settings.save_original = value;
                 }
+            } else if key.trim().eq_ignore_ascii_case("AutomaticWebpToPng") {
+                if let Some(value) = parse_bool(value) {
+                    settings.automatic_webp_to_png = value;
+                }
             } else if key.trim().eq_ignore_ascii_case("SaveAvenged") {
                 if let Some(value) = parse_bool(value) {
                     settings.save_avenged = value;
@@ -139,7 +147,7 @@ impl Settings {
         settings
     }
     fn to_ini(&self) -> String {
-        format!("; Clipboard Avenger settings\n; JPEG quality applies to JPG. PNG and WEBP use lossless compression.\n; ResizePercent=100 means Don't. Empty SaveFolder uses Saved beside the EXE.\n[Settings]\nEnabled={}\nCompression={}\nJpegQuality={}\nResizePercent={}\nSaveOriginal={}\nSaveAvenged={}\nSaveFolder={}\nSaveFolderFailures={}\nStartWithWindows={}\n", self.enabled, self.compression.label(), self.jpeg_quality, self.resize_percent, self.save_original, self.save_avenged, self.save_folder, self.folder_failures, self.start_with_windows)
+        format!("; Clipboard Avenger settings\n; JPEG quality applies to JPG. PNG uses lossless compression.\n; AutomaticWebpToPng converts WebP even if PNG is larger. Smaller opaque JPG takes priority.\n; ResizePercent=100 means Don't. Empty SaveFolder uses Saved beside the EXE.\n[Settings]\nEnabled={}\nCompression={}\nAutomaticWebpToPng={}\nJpegQuality={}\nResizePercent={}\nSaveOriginal={}\nSaveAvenged={}\nSaveFolder={}\nSaveFolderFailures={}\nStartWithWindows={}\n", self.enabled, self.compression.label(), self.automatic_webp_to_png, self.jpeg_quality, self.resize_percent, self.save_original, self.save_avenged, self.save_folder, self.folder_failures, self.start_with_windows)
     }
 }
 fn parse_bool(value: &str) -> Option<bool> {
@@ -196,6 +204,7 @@ fn save() {
         enabled: ENABLED.load(Relaxed),
         jpeg_quality: QUALITY.load(Relaxed) as u8,
         compression: Compression::from_id(COMPRESSION.load(Relaxed)),
+        automatic_webp_to_png: AUTOMATIC_WEBP_TO_PNG.load(Relaxed),
         start_with_windows: START_WITH_WINDOWS.load(Relaxed),
         resize_percent: RESIZE.load(Relaxed) as u8,
         save_original: SAVE_ORIGINAL.load(Relaxed),
@@ -241,6 +250,7 @@ unsafe fn bytes(fmt: u32) -> Option<Vec<u8>> {
 struct ScanOptions {
     quality: u8,
     compression: Compression,
+    automatic_webp_to_png: bool,
     resize_percent: u8,
     save_original: bool,
     save_avenged: bool,
@@ -252,6 +262,7 @@ impl ScanOptions {
         Self {
             quality: QUALITY.load(Relaxed) as u8,
             compression: Compression::from_id(COMPRESSION.load(Relaxed)),
+            automatic_webp_to_png: AUTOMATIC_WEBP_TO_PNG.load(Relaxed),
             resize_percent: RESIZE.load(Relaxed) as u8,
             save_original: SAVE_ORIGINAL.load(Relaxed),
             save_avenged: SAVE_AVENGED.load(Relaxed),
@@ -261,6 +272,15 @@ impl ScanOptions {
     }
     fn active(&self) -> bool {
         ENABLED.load(Relaxed) && self.revision == REVISION.load(Relaxed)
+    }
+    fn for_file(&self, generated: bool) -> Self {
+        let mut options = self.clone();
+        if generated {
+            // A working copy already has the selected resize applied. A WebP
+            // compatibility upgrade changes its format, not its size again.
+            options.resize_percent = 100;
+        }
+        options
     }
 }
 fn options_changed() {
@@ -354,9 +374,10 @@ fn archive_images(
 }
 fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
     let key = format!(
-        "{}-c{}",
+        "{}-c{}-w{}",
         cache_key(data, dib, options.quality, options.resize_percent),
-        options.compression as u32
+        options.compression as u32,
+        options.automatic_webp_to_png
     );
     // Archiving preferences also affect scan results, including a no-shrink
     // image whose original still needs saving after Save Original is enabled.
@@ -385,22 +406,26 @@ fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
         }
     }
     let result = (|| {
-        if !dib
-            && (data.starts_with(b"GIF8")
-                || (data.starts_with(b"RIFF") && data.windows(4).any(|w| w == b"ANIM"))
-                || data.windows(4).any(|w| w == b"acTL"))
-        {
-            return None;
-        }
-        let img = if dib {
-            dib_image(data)?
-        } else {
-            image::load_from_memory(data).ok()?
-        };
         let source = if dib {
             image::ImageFormat::Bmp
         } else {
             image::guess_format(data).ok()?
+        };
+        let img = if dib {
+            dib_image(data)?
+        } else if source == image::ImageFormat::WebP {
+            let decoder = image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(data)).ok()?;
+            if decoder.has_animation() {
+                return None;
+            }
+            image::DynamicImage::from_decoder(decoder).ok()?
+        } else {
+            if data.starts_with(b"GIF8")
+                || (source == image::ImageFormat::Png && data.windows(4).any(|w| w == b"acTL"))
+            {
+                return None;
+            }
+            image::load_from_memory(data).ok()?
         };
         let out = imaging::encoded_as(
             &img,
@@ -409,6 +434,7 @@ fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
             options.resize_percent,
             options.compression,
             source,
+            options.automatic_webp_to_png,
         );
         if !options.active() {
             return None;
@@ -421,7 +447,7 @@ fn convert(data: &[u8], dib: bool, options: &ScanOptions) -> Option<PathBuf> {
         std::fs::create_dir_all(path.parent()?).ok()?;
         std::fs::write(&path, &out.bytes).ok()?;
         log(&format!(
-            "Compressed {} bytes to {} bytes ({}, resize {}%)",
+            "Processed {} bytes to {} bytes ({}, resize {}%)",
             data.len(),
             out.bytes.len(),
             out.extension,
@@ -476,6 +502,14 @@ fn eligible_file(path: &std::path::Path) -> bool {
     ]
     .contains(&ext.as_str())
 }
+fn convert_generated_webp(path: &std::path::Path, automatic_webp_to_png: bool) -> bool {
+    // Old releases (or Same as Source with conversion OFF) can leave WebP
+    // working copies. Convert those once; continue skipping our JPG/PNG output.
+    automatic_webp_to_png
+        && path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("webp"))
+}
 fn log(message: &str) {
     use std::io::Write;
     let path = home().join("activity.log");
@@ -518,8 +552,18 @@ unsafe fn scan(hwnd: HWND, seq: u32, options: ScanOptions) {
     } else {
         let png = RegisterClipboardFormatW(wide("PNG").as_ptr());
         let jpeg = RegisterClipboardFormatW(wide("JFIF").as_ptr());
+        // Some applications offer encoded WebP as well as a decoded PNG/DIB.
+        // Prefer the real source so the conversion rule and size comparison
+        // use WebP bytes. Validate custom formats before accepting them.
+        let webp = ["WebP", "image/webp"].into_iter().find_map(|name| {
+            bytes(RegisterClipboardFormatW(wide(name).as_ptr()))
+                .filter(|data| image::guess_format(data).ok() == Some(image::ImageFormat::WebP))
+        });
         // Prefer alpha-preserving encoded data over synthesized bitmap formats.
-        raw = bytes(png).or_else(|| bytes(jpeg)).map(|b| (b, false));
+        raw = webp
+            .or_else(|| bytes(png))
+            .or_else(|| bytes(jpeg))
+            .map(|b| (b, false));
         if raw.is_none() {
             raw = bytes(17).or_else(|| bytes(8)).map(|b| (b, true));
         }
@@ -547,11 +591,14 @@ unsafe fn scan(hwnd: HWND, seq: u32, options: ScanOptions) {
                         changed = true;
                     }
                 }
-                continue;
+                if !convert_generated_webp(path, options.automatic_webp_to_png) {
+                    continue;
+                }
             }
-            if path.starts_with(image_dir())
+            let generated = path.starts_with(image_dir())
                 || path.starts_with(image_dir().parent().unwrap().join("Desktop Image Avenger"))
-            {
+                || path.starts_with(legacy_home().join("Images"));
+            if generated && !convert_generated_webp(path, options.automatic_webp_to_png) {
                 continue;
             }
 
@@ -566,7 +613,7 @@ unsafe fn scan(hwnd: HWND, seq: u32, options: ScanOptions) {
                 continue;
             }
             if let Ok(data) = std::fs::read(&path) {
-                if let Some(new) = convert(&data, false, &options) {
+                if let Some(new) = convert(&data, false, &options.for_file(generated)) {
                     *path = new;
                     changed = true;
                 }
@@ -634,12 +681,7 @@ unsafe fn tray_menu() -> HMENU {
     AppendMenuW(menu, MF_STRING, 1, wide(a).as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, null_mut());
     let compression_menu = CreatePopupMenu();
-    for compression in [
-        Compression::Png,
-        Compression::Jpg,
-        Compression::Webp,
-        Compression::Source,
-    ] {
+    for compression in [Compression::Png, Compression::Jpg, Compression::Source] {
         AppendMenuW(
             compression_menu,
             MF_STRING
@@ -675,6 +717,19 @@ unsafe fn tray_menu() -> HMENU {
         compression_menu as usize,
         wide("Compression").as_ptr(),
     );
+    let misc_menu = CreatePopupMenu();
+    AppendMenuW(
+        misc_menu,
+        MF_STRING
+            | if AUTOMATIC_WEBP_TO_PNG.load(Relaxed) {
+                MF_CHECKED
+            } else {
+                0
+            },
+        AUTOMATIC_WEBP_MENU as usize,
+        wide("Automatic WebP to PNG conversion").as_ptr(),
+    );
+    AppendMenuW(menu, MF_POPUP, misc_menu as usize, wide("Misc").as_ptr());
     let resize_menu = CreatePopupMenu();
     let selected_resize = RESIZE.load(Relaxed);
     for resize in [100, 75, 50, 25] {
@@ -845,8 +900,16 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                             options_changed();
                         }
                     }
-                    cmd if (COMPRESSION_MENU_BASE..=COMPRESSION_MENU_BASE + 3)
-                        .contains(&(cmd as u32)) =>
+                    cmd if cmd as u32 == AUTOMATIC_WEBP_MENU => {
+                        AUTOMATIC_WEBP_TO_PNG.fetch_xor(true, Relaxed);
+                        options_changed();
+                    }
+                    cmd if [
+                        COMPRESSION_MENU_BASE,
+                        COMPRESSION_MENU_BASE + 1,
+                        COMPRESSION_MENU_BASE + 3,
+                    ]
+                    .contains(&(cmd as u32)) =>
                     {
                         COMPRESSION.store(cmd as u32 - COMPRESSION_MENU_BASE, Relaxed);
                         options_changed();
@@ -998,6 +1061,7 @@ fn main() {
         ENABLED.store(settings.enabled, Relaxed);
         QUALITY.store(settings.jpeg_quality as u32, Relaxed);
         COMPRESSION.store(settings.compression as u32, Relaxed);
+        AUTOMATIC_WEBP_TO_PNG.store(settings.automatic_webp_to_png, Relaxed);
         RESIZE.store(settings.resize_percent as u32, Relaxed);
         SAVE_ORIGINAL.store(settings.save_original, Relaxed);
         SAVE_AVENGED.store(settings.save_avenged, Relaxed);
@@ -1220,26 +1284,30 @@ mod tests {
         unsafe {
             let menu = tray_menu();
             assert!(!menu.is_null());
-            assert_eq!(GetMenuItemCount(menu), 8);
+            assert_eq!(GetMenuItemCount(menu), 9);
             assert_eq!(GetMenuItemID(menu, 0), 1);
             assert_ne!(GetMenuState(menu, 1, MF_BYPOSITION) & MF_SEPARATOR, 0);
-            assert_ne!(GetMenuState(menu, 5, MF_BYPOSITION) & MF_SEPARATOR, 0);
-            assert_eq!(GetMenuItemID(menu, 6), 3);
-            assert_eq!(GetMenuItemID(menu, 7), 2);
+            assert_ne!(GetMenuState(menu, 6, MF_BYPOSITION) & MF_SEPARATOR, 0);
+            assert_eq!(GetMenuItemID(menu, 7), 3);
+            assert_eq!(GetMenuItemID(menu, 8), 2);
             let compression = GetSubMenu(menu, 2);
-            assert_eq!(GetMenuItemCount(compression), 6);
-            for index in 0..4 {
+            assert_eq!(GetMenuItemCount(compression), 5);
+            for (index, id) in [0, 1, 3].into_iter().enumerate() {
                 assert_eq!(
-                    GetMenuItemID(compression, index),
-                    COMPRESSION_MENU_BASE + index as u32
+                    GetMenuItemID(compression, index as i32),
+                    COMPRESSION_MENU_BASE + id
                 );
             }
             assert_ne!(
-                GetMenuState(compression, 4, MF_BYPOSITION) & MF_SEPARATOR,
+                GetMenuState(compression, 3, MF_BYPOSITION) & MF_SEPARATOR,
                 0
             );
-            assert_eq!(GetMenuItemCount(GetSubMenu(compression, 5)), 11);
-            let resize = GetSubMenu(menu, 3);
+            assert_eq!(GetMenuItemCount(GetSubMenu(compression, 4)), 11);
+            let misc = GetSubMenu(menu, 3);
+            assert_eq!(GetMenuItemCount(misc), 1);
+            assert_eq!(GetMenuItemID(misc, 0), AUTOMATIC_WEBP_MENU);
+            assert_ne!(GetMenuState(misc, 0, MF_BYPOSITION) & MF_CHECKED, 0);
+            let resize = GetSubMenu(menu, 4);
             assert_eq!(GetMenuItemCount(resize), 4);
             for (index, percent) in [100, 75, 50, 25].into_iter().enumerate() {
                 assert_eq!(
@@ -1247,7 +1315,7 @@ mod tests {
                     RESIZE_MENU_BASE + percent
                 );
             }
-            let save = GetSubMenu(menu, 4);
+            let save = GetSubMenu(menu, 5);
             assert_eq!(GetMenuItemCount(save), 3);
             assert_eq!(GetMenuItemID(save, 0), 4);
             assert_eq!(GetMenuItemID(save, 1), 5);
@@ -1259,12 +1327,7 @@ mod tests {
     }
     #[test]
     fn every_compression_choice_is_saved_and_restored() {
-        for compression in [
-            Compression::Png,
-            Compression::Jpg,
-            Compression::Webp,
-            Compression::Source,
-        ] {
+        for compression in [Compression::Png, Compression::Jpg, Compression::Source] {
             let settings = Settings {
                 compression,
                 ..Settings::default()
@@ -1275,6 +1338,78 @@ mod tests {
             Settings::from_ini("[Settings]\nCompression=unknown\n").compression,
             Compression::Jpg
         );
+        assert_eq!(
+            Settings::from_ini("[Settings]\nCompression=WEBP\n").compression,
+            Compression::Jpg
+        );
+    }
+    #[test]
+    fn automatic_webp_conversion_is_remembered_and_defaults_on() {
+        assert!(Settings::default().automatic_webp_to_png);
+        assert!(Settings::from_ini("[Settings]\nEnabled=false\n").automatic_webp_to_png);
+        for automatic_webp_to_png in [false, true] {
+            let settings = Settings {
+                automatic_webp_to_png,
+                ..Settings::default()
+            };
+            assert_eq!(Settings::from_ini(&settings.to_ini()), settings);
+        }
+        assert!(!Settings::from_ini("[Settings]\nAutomaticWebpToPng=0\n").automatic_webp_to_png);
+        assert!(
+            Settings::from_ini("[Settings]\nAutomaticWebpToPng=invalid\n").automatic_webp_to_png
+        );
+    }
+    #[test]
+    fn generated_webp_can_be_converted_without_reprocessing_our_jpg_or_png() {
+        for name in ["generated.webp", "generated.WEBP"] {
+            assert!(convert_generated_webp(std::path::Path::new(name), true));
+            assert!(!convert_generated_webp(std::path::Path::new(name), false));
+        }
+        for name in ["generated.jpg", "generated.png", "not-an-image.txt"] {
+            assert!(!convert_generated_webp(std::path::Path::new(name), true));
+        }
+    }
+    #[test]
+    fn generated_webp_format_upgrade_does_not_resize_a_second_time() {
+        let original = DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            48,
+            32,
+            image::Rgba([30, 120, 220, 127]),
+        ));
+        let mut webp = std::io::Cursor::new(Vec::new());
+        original
+            .write_to(&mut webp, image::ImageFormat::WebP)
+            .unwrap();
+        let decoded = image::load_from_memory(webp.get_ref()).unwrap();
+        let options = ScanOptions {
+            quality: 95,
+            compression: Compression::Jpg,
+            automatic_webp_to_png: true,
+            resize_percent: 50,
+            save_original: false,
+            save_avenged: false,
+            folder: None,
+            revision: 0,
+        };
+        for (generated, dimensions) in [(true, (48, 32)), (false, (24, 16))] {
+            let options = options.for_file(generated);
+            let out = imaging::encoded_as(
+                &decoded,
+                webp.get_ref().len(),
+                options.quality,
+                options.resize_percent,
+                options.compression,
+                image::ImageFormat::WebP,
+                options.automatic_webp_to_png,
+            )
+            .unwrap();
+            assert_eq!(out.extension, "png");
+            let processed = image::load_from_memory(&out.bytes).unwrap();
+            assert_eq!((processed.width(), processed.height()), dimensions);
+            if generated {
+                assert_eq!(processed.to_rgba8(), decoded.to_rgba8());
+            }
+        }
     }
     #[test]
     fn darker_tray_artwork_creates_a_valid_windows_icon() {
